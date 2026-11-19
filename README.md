@@ -18,12 +18,13 @@ sight, intercept its patrol and know what to expect before you pull it.
   summarized by quality, and the rare/epic ones are listed item by item.
 - **Personal stats**: last time seen, kill count and what you have looted from each rare.
 - **Alerts**: sound and on-screen warning when a rare shows up on your minimap.
-- **Unknown rare recording**: rares that are not in the database yet (new WoW Forever
-  content) are saved with their location, so future data updates can include them.
+- **Community data**: rares that are not in the database yet (new WoW Forever content) are
+  recorded with their location, and a clickable chat message guides you to share them so
+  they are added for everyone.
 - **Clean map**: pins on zone maps by default; continent and world maps are optional and
   show pins only, never patrol lines.
-- **Localized automatically**: names, spells and items come from the game client, so they
-  appear in your client's language.
+- **Localized**: the interface is available in English and Spanish (esES/esMX); names,
+  spells and items come from the game client, so they appear in your client's language.
 
 ## Installation
 
@@ -45,6 +46,7 @@ waypoint. Settings are under *Options > AddOns > RareCodex*.
 | `/rc show zone\|continent\|world` | Toggle pins per map type (default: zone maps only) |
 | `/rc paths` | Toggle patrol lines |
 | `/rc alerts` | Toggle rare alerts |
+| `/rc share` | Share rares recorded in game that are not in the database |
 | `/rc check` | Verify the world-to-map coordinate conversion |
 | `/rc swap` | Flip coordinate axes if pins appear in wrong places |
 
@@ -61,8 +63,8 @@ It currently contains **331 open-world rares** and **99 exact patrol routes**.
 
 ## Known limitations (alpha)
 
-- Rares added by WoW Forever are not in the database yet; the addon records them when seen.
-- Interface texts (labels, buttons) are English only for now; game data is localized.
+- Rares added by WoW Forever are not in the CMaNGOS database. The addon records them when
+  seen (see below), but they have no ability, route or loot-table data.
 - Kills are counted when you loot the corpse.
 
 ## Development
@@ -88,15 +90,54 @@ uv run python tools/package.py           # build dist/RareCodex-<version>.zip
 uv run python tools/make_textures.py     # regenerate Media/*.tga route textures
 ```
 
+### How shared rare data reaches the addon
+
+Rares missing from the database are saved when they appear on a player's minimap (position)
+or are targeted (level and rank). Addons cannot access the internet, so sharing is guided:
+
+1. A clickable chat message (or `/rc share`) opens a window with three steps: open the
+   [Share rare data](../../issues/new?template=rare-data.yml) form, copy the data, paste it.
+2. The **Rare data submission** workflow validates the JSON (`tools/ingest_submission.py`),
+   merges it into `data/forever_rares.json` and opens a pull request, or comments the
+   errors on the issue. Each rare keeps the issue numbers that reported it.
+3. A maintainer reviews and merges the pull request, then regenerates the database (next
+   section). `--min-reports 2` only includes rares confirmed by two separate submissions.
+   Rares already in CMaNGOS are skipped.
+
+### Translations
+
+Interface texts are written in English in the code as `L["English text"]`; each
+`RareCodex/Locales/<locale>.lua` maps them to another language. `tests/test_locales.py`
+fails if a text has no translation or a format specifier (`%s`, `%d`) does not match.
+
 ### Regenerating the rare database
 
 1. `git clone --depth 1 https://github.com/cmangos/classic-db`
 2. Decompress `Full_DB/ClassicDB_*.sql.gz` (no MySQL server needed)
 3. `uv run python tools/build_data.py path/to/ClassicDB.sql`
 
+## Contributing
+
+- **Rare data**: play with the addon and use the chat link or `/rc share`.
+- **Bugs**: open a [bug report](../../issues/new?template=bug_report.yml) with the BugSack error.
+- **Translations**: see *Translations* above; every text must keep its `%s`/`%d` placeholders.
+
+Pushing a `v*` tag runs the **Release** workflow: tests, version check against the TOC,
+package and GitHub release (tags with a suffix such as `-alpha` become pre-releases).
+
 ## License
 
-No license has been chosen yet. Game data is derived from
-[CMaNGOS Classic DB](https://github.com/cmangos/classic-db), which is GPL-3.0.
-World of Warcraft content and materials are trademarks and copyrights of Blizzard
-Entertainment. This project is not affiliated with Blizzard.
+Copyright (C) 2026 Graclyxz and RareCodex contributors.
+
+RareCodex is free software: you can redistribute it and/or modify it under the terms of the
+**GNU General Public License version 3** as published by the Free Software Foundation.
+It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even
+the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See
+[LICENSE](LICENSE) for the full text.
+
+Contributions (code, translations and rare data submitted by players) are accepted under the
+same license.
+
+The rare database is derived from [CMaNGOS Classic DB](https://github.com/cmangos/classic-db),
+also licensed under GPL-3.0. World of Warcraft content and materials are trademarks and
+copyrights of Blizzard Entertainment. This project is not affiliated with Blizzard.

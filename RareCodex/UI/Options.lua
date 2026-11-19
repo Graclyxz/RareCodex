@@ -1,25 +1,33 @@
 -- Options: panel under Game Menu > Options > AddOns > RareCodex.
 local addonName, ns = ...
+local L = ns.L
 
-local CHECKBOXES = {
-    { section = "Show rare pins on" },
-    { label = "Zone maps", get = function() return ns.db.show.zone end,
-      set = function(v) ns.db.show.zone = v end },
-    { label = "Continent maps (pins only, no patrol lines)", get = function() return ns.db.show.continent end,
-      set = function(v) ns.db.show.continent = v end },
-    { label = "World map (pins only, no patrol lines)", get = function() return ns.db.show.world end,
-      set = function(v) ns.db.show.world = v end },
-    { section = "Display" },
-    { label = "Patrol routes and wander areas on zone maps", get = function() return ns.db.showPaths end,
-      set = function(v) ns.db.showPaths = v end },
-    { label = "Spawn area: outline around all the points where a rare can spawn",
-      get = function() return ns.db.showSpawnArea end,
-      set = function(v) ns.db.showSpawnArea = v end },
-    { label = "Number of possible spawn points on each pin",
-      get = function() return ns.db.showSpawnCount end,
-      set = function(v) ns.db.showSpawnCount = v end },    { section = "Alerts" },
-    { label = "Sound and on-screen warning when a rare appears", get = function() return ns.db.alerts end,
-      set = function(v) ns.db.alerts = v end },
+local function Setting(key)
+    return function() return ns.db[key] end, function(v) ns.db[key] = v end
+end
+
+local function ShowSetting(scope)
+    return function() return ns.db.show[scope] end, function(v) ns.db.show[scope] = v end
+end
+
+local function Check(label, get, set)
+    return { label = label, get = get, set = set }
+end
+
+local ITEMS = {
+    { section = L["Show rare pins on"] },
+    Check(L["Zone maps"], ShowSetting("zone")),
+    Check(L["Continent maps (pins only, no patrol routes)"], ShowSetting("continent")),
+    Check(L["World map (pins only, no patrol routes)"], ShowSetting("world")),
+    { section = L["Display"] },
+    Check(L["Patrol routes and wander areas on zone maps"], Setting("showPaths")),
+    Check(L["Spawn area: outline around all the points where a rare can spawn"], Setting("showSpawnArea")),
+    Check(L["Number of possible spawn points on each pin"], Setting("showSpawnCount")),
+    { section = L["Alerts"] },
+    Check(L["Sound and on-screen warning when a rare appears"], Setting("alerts")),
+    { section = L["Rares recorded in game"] },
+    Check(L["Chat reminder to share rares that are not in the database"], Setting("contributeReminders")),
+    { button = L["Share recorded rares"], onClick = function() ns.Contribute.Show() end },
 }
 
 local category
@@ -32,23 +40,30 @@ local function CreatePanel()
     title:SetText(addonName)
 
     local y = -52
-    for _, def in ipairs(CHECKBOXES) do
-        if def.section then
+    for _, item in ipairs(ITEMS) do
+        if item.section then
             local header = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
             header:SetPoint("TOPLEFT", 16, y - 8)
-            header:SetText(def.section)
+            header:SetText(item.section)
             y = y - 32
+        elseif item.button then
+            local button = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+            button:SetPoint("TOPLEFT", 24, y)
+            button:SetSize(200, 22)
+            button:SetText(item.button)
+            button:SetScript("OnClick", item.onClick)
+            y = y - 30
         else
             local check = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
             check:SetPoint("TOPLEFT", 24, y)
             local label = check:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
             label:SetPoint("LEFT", check, "RIGHT", 4, 0)
-            label:SetText(def.label)
+            label:SetText(item.label)
             check:SetScript("OnClick", function(self)
-                def.set(self:GetChecked())
+                item.set(self:GetChecked())
                 ns.RefreshMap()
             end)
-            check.def = def
+            check.item = item
             checkboxes[#checkboxes + 1] = check
             y = y - 28
         end
@@ -56,7 +71,7 @@ local function CreatePanel()
 
     -- Saved values may change through slash commands, so sync every time the panel opens.
     panel:SetScript("OnShow", function()
-        for _, check in ipairs(checkboxes) do check:SetChecked(check.def.get()) end
+        for _, check in ipairs(checkboxes) do check:SetChecked(check.item.get()) end
     end)
     return panel
 end

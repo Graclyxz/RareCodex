@@ -1,5 +1,6 @@
 -- Core: namespace, event dispatch, saved variables and shared helpers.
 local addonName, ns = ...
+local L = ns.L
 
 ns.name = addonName
 ns.Rares = ns.Rares or {}
@@ -15,6 +16,7 @@ local DEFAULTS = {
     showSpawnCount = false,  -- number of possible spawn points on the pin
     showSpawnArea = false,   -- outline enclosing all of a rare's possible spawn points
     alerts = true,
+    contributeReminders = true,  -- clickable chat message to share recorded rares
 }
 
 -- Fills missing keys (including inside nested tables) without touching saved values.
@@ -112,16 +114,28 @@ function ns.FormatDuration(seconds)
     return ("%dm"):format(math.floor(seconds / 60))
 end
 
+-- Rares recorded in game (rare.unknown) have no respawn or level data.
 function ns.FormatRespawn(rare)
+    if not rare.respawn then return L["Unknown"] end
     local low, high = rare.respawn[1], rare.respawn[2]
     if low == high then return ns.FormatDuration(low) end
     return ns.FormatDuration(low) .. " - " .. ns.FormatDuration(high)
 end
 
+function ns.FormatLevel(rare)
+    if not rare.level then return "?" end
+    if rare.level[1] == rare.level[2] then return tostring(rare.level[1]) end
+    return rare.level[1] .. "-" .. rare.level[2]
+end
+
+function ns.FormatRank(rare)
+    return rare.elite and L["Rare Elite"] or L["Rare"]
+end
+
 function ns.FormatAgo(stamp)
     local delta = time() - stamp
-    if delta < 60 then return "just now" end
-    return ns.FormatDuration(delta) .. " ago"
+    if delta < 60 then return L["just now"] end
+    return L["%s ago"]:format(ns.FormatDuration(delta))
 end
 
 function ns.FormatChance(chance)
@@ -132,7 +146,7 @@ function ns.FormatChance(chance)
 end
 
 function ns.Print(msg)
-    print("|cff33ccffRareCodex|r: " .. msg)
+    print("|cff33ccffRareCodex|r: " .. msg)  -- addon name is not translated
 end
 
 -- Slash commands ---------------------------------------------------------------
@@ -145,6 +159,24 @@ local function FindRare(query)
     end
 end
 
+local function OnOff(value)
+    return value and L["on"] or L["off"]
+end
+
+-- Translation keys stay literal (not built at runtime) so tests/test_locales.py can check
+-- that every one is translated.
+local HELP = {
+    { "/rc <name | npcID>", L["open the details of a rare"] },
+    { "/rc config", L["open the options"] },
+    { "/rc show zone | continent | world", L["toggle pins per map type"] },
+    { "/rc paths", L["toggle patrol routes"] },
+    { "/rc alerts", L["toggle rare alerts"] },
+    { "/rc share", L["share rares recorded in game that are not in the database"] },
+    { "/rc check", L["verify map coordinates"] },
+    { "/rc swap", L["flip coordinate axes"] },
+}
+local SCOPE_NAMES = { zone = L["zone"], continent = L["continent"], world = L["world"] }
+
 SLASH_RARECODEX1 = "/rarecodex"
 SLASH_RARECODEX2 = "/rc"
 SlashCmdList.RARECODEX = function(input)
@@ -152,35 +184,37 @@ SlashCmdList.RARECODEX = function(input)
     local command = input:lower()
     local scope = command:match("^show (%a+)$")
     if command == "" then
-        ns.Print("/rc <name or npcID> - open details | /rc config - options"
-            .. " | /rc show zone|continent|world - toggle pins per map type"
-            .. " | /rc paths - toggle patrol lines | /rc alerts - toggle alerts"
-            .. " | /rc check - verify map coordinates | /rc swap - flip coordinate axes")
+        ns.Print(L["Commands:"])
+        for _, entry in ipairs(HELP) do
+            print(("  |cffffd200%s|r - %s"):format(entry[1], entry[2]))
+        end
     elseif command == "config" then
         ns.OpenOptions()
-    elseif scope and ns.db.show[scope] ~= nil then
+    elseif command == "share" or command == "export" then
+        ns.Contribute.Show()
+    elseif scope and SCOPE_NAMES[scope] then
         ns.db.show[scope] = not ns.db.show[scope]
         ns.RefreshMap()
-        ns.Print(("Pins on %s maps: %s"):format(scope, ns.db.show[scope] and "on" or "off"))
+        ns.Print(L["Pins on %s maps: %s"]:format(SCOPE_NAMES[scope], OnOff(ns.db.show[scope])))
     elseif command == "check" then
         ns.Coords.Calibrate(true)
     elseif command == "swap" then
         ns.db.axisSwapped = not ns.db.axisSwapped
         ns.Coords.Invalidate()
-        ns.Print("Axis order swapped: " .. tostring(ns.db.axisSwapped))
+        ns.Print(L["Coordinate axes swapped: %s"]:format(OnOff(ns.db.axisSwapped)))
     elseif command == "paths" then
         ns.db.showPaths = not ns.db.showPaths
         ns.RefreshMap()
-        ns.Print("Patrol lines " .. (ns.db.showPaths and "on" or "off"))
+        ns.Print(L["Patrol routes: %s"]:format(OnOff(ns.db.showPaths)))
     elseif command == "alerts" then
         ns.db.alerts = not ns.db.alerts
-        ns.Print("Alerts " .. (ns.db.alerts and "on" or "off"))
+        ns.Print(L["Alerts: %s"]:format(OnOff(ns.db.alerts)))
     else
         local npcID = FindRare(input)
         if npcID then
             ns.DetailPanel.Show(npcID)
         else
-            ns.Print("No rare found for '" .. input .. "'")
+            ns.Print(L["No rare found for '%s'"]:format(input))
         end
     end
 end

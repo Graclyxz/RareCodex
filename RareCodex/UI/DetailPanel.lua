@@ -1,13 +1,18 @@
 -- DetailPanel: full view of one rare - 3D model, abilities, behavior, loot and world drops.
 local _, ns = ...
+local L = ns.L
 
 local DetailPanel = {}
 ns.DetailPanel = DetailPanel
 
 local WIDTH, HEIGHT = 640, 480
 local PAD = 12
+local CONTENT_TOP = -32
 local MODEL_W, MODEL_H = 230, 290
 local RIGHT_X = PAD + MODEL_W + 16
+local RIGHT_W = WIDTH - RIGHT_X - PAD
+local HEADER_GAP = 18     -- header text to the content below it
+local SECTION_GAP = 14    -- end of one section to the next header
 local ICON = 32
 local CELL_W, CELL_H = 42, 50
 local LOOT_COLUMNS = 8
@@ -30,7 +35,7 @@ end
 local function CreateModel(parent)
     local bg = parent:CreateTexture(nil, "BACKGROUND")
     bg:SetColorTexture(0.05, 0.05, 0.08, 0.9)
-    bg:SetPoint("TOPLEFT", PAD, -32)
+    bg:SetPoint("TOPLEFT", PAD, CONTENT_TOP)
     bg:SetSize(MODEL_W, MODEL_H)
 
     local model = CreateFrame("PlayerModel", nil, parent)
@@ -54,7 +59,7 @@ local function CreateModel(parent)
 
     local hint = model:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     hint:SetPoint("BOTTOM", 0, 4)
-    hint:SetText("Drag to rotate, wheel to zoom")
+    hint:SetText(L["Drag to rotate, wheel to zoom"])
     return model
 end
 
@@ -62,10 +67,11 @@ local function ShowItemTooltip(self)
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
     GameTooltip:SetItemByID(self.itemID)
     GameTooltip:AddLine(" ")
-    GameTooltip:AddDoubleLine("Estimated drop chance", ns.FormatChance(self.chance), 0.7, 0.7, 0.7, 1, 1, 1)
-    if self.quest then GameTooltip:AddLine("Quest item: only drops while on the quest", 1, 0.82, 0) end
+    local label = self.personal and L["Your drop rate"] or L["Estimated drop chance"]
+    GameTooltip:AddDoubleLine(label, ns.FormatChance(self.chance), 0.7, 0.7, 0.7, 1, 1, 1)
+    if self.quest then GameTooltip:AddLine(L["Quest item: only drops while on the quest"], 1, 0.82, 0) end
     if self.looted and self.looted > 0 then
-        GameTooltip:AddDoubleLine("You looted", self.looted, 0.7, 0.7, 0.7, 0.4, 1, 0.4)
+        GameTooltip:AddDoubleLine(L["You looted"], self.looted, 0.7, 0.7, 0.7, 0.4, 1, 0.4)
     end
     GameTooltip:Show()
 end
@@ -124,14 +130,14 @@ local function ShowWorldTooltip(self)
     if drop.items then
         for i, loot in ipairs(drop.items) do
             if i > WORLD_LIST_MAX then
-                GameTooltip:AddLine(("... and %d more"):format(#drop.items - WORLD_LIST_MAX), 0.7, 0.7, 0.7)
+                GameTooltip:AddLine(L["... and %d more"]:format(#drop.items - WORLD_LIST_MAX), 0.7, 0.7, 0.7)
                 break
             end
             local name, link = C_Item.GetItemInfo(loot[1])
             GameTooltip:AddDoubleLine(link or name or ("item:" .. loot[1]), ns.FormatChance(loot[2]))
         end
     else
-        GameTooltip:AddLine(("Random pick from %d items of this quality."):format(drop.n), 0.7, 0.7, 0.7, true)
+        GameTooltip:AddLine(L["Random pick from %d items of this quality."]:format(drop.n), 0.7, 0.7, 0.7, true)
     end
     GameTooltip:Show()
 end
@@ -140,7 +146,7 @@ local function GetWorldButton(i)
     local button = worldButtons[i]
     if not button then
         button = CreateFrame("Button", nil, panel)
-        button:SetSize(WIDTH - RIGHT_X - PAD, 16)
+        button:SetSize(RIGHT_W, 16)
         button.label = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         button.label:SetPoint("LEFT")
         button:SetScript("OnEnter", ShowWorldTooltip)
@@ -150,12 +156,8 @@ local function GetWorldButton(i)
     return button
 end
 
-local function ShowUrl(url)
-    StaticPopup_Show("RARECODEX_URL", nil, nil, url)
-end
-
 StaticPopupDialogs.RARECODEX_URL = {
-    text = "Copy the link (Ctrl+C):",
+    text = L["Copy the link (Ctrl+C):"],
     button1 = CLOSE,
     hasEditBox = true,
     editBoxWidth = 320,
@@ -198,32 +200,33 @@ local function CreatePanel()
     panel.Model = CreateModel(panel)
 
     panel.Info = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    panel.Info:SetPoint("TOPLEFT", PAD, -32 - MODEL_H - 10)
+    panel.Info:SetPoint("TOPLEFT", PAD, CONTENT_TOP - MODEL_H - 10)
     panel.Info:SetWidth(MODEL_W)
     panel.Info:SetJustifyH("LEFT")
     panel.Info:SetSpacing(3)
 
-    panel.AbilitiesHeader = Header(panel, "Abilities")
-    panel.AbilitiesHeader:SetPoint("TOPLEFT", RIGHT_X, -32)
+    panel.AbilitiesHeader = Header(panel, L["Abilities"])
+    panel.AbilitiesHeader:SetPoint("TOPLEFT", RIGHT_X, CONTENT_TOP)
 
     panel.Behavior = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    panel.Behavior:SetPoint("TOPLEFT", RIGHT_X, -32 - 18 - ICON - 6)
-    panel.Behavior:SetWidth(WIDTH - RIGHT_X - PAD)
+    panel.Behavior:SetWidth(RIGHT_W)
     panel.Behavior:SetJustifyH("LEFT")
 
-    panel.LootHeader = Header(panel, "Loot (estimated drop chance)")
-    panel.WorldHeader = Header(panel, "World drops")
+    panel.LootHeader = Header(panel, "")
+    panel.WorldHeader = Header(panel, L["World drops"])
 
     local buttons = {
-        { "Show on map", function()
+        { L["Show on map"], function()
             local mapID = PrimarySpawnOnMap(currentID)
             if mapID then OpenWorldMap(mapID) end
         end },
-        { "Waypoint", function()
+        { L["Waypoint"], function()
             local mapID, x, y = PrimarySpawnOnMap(currentID)
             if mapID and x then ns.SetWaypoint(mapID, x, y) end
         end },
-        { "Wowhead link", function() ShowUrl(WOWHEAD_URL:format(currentID)) end },
+        { L["Wowhead link"], function()
+            StaticPopup_Show("RARECODEX_URL", nil, nil, WOWHEAD_URL:format(currentID))
+        end },
     }
     for i, def in ipairs(buttons) do
         local button = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
@@ -235,6 +238,8 @@ local function CreatePanel()
 end
 
 -- Rendering ----------------------------------------------------------------------
+-- Each Render* function lays out one section starting at `top` and returns where the
+-- next section starts, so empty sections take no space.
 local function QualityColor(quality)
     local r, g, b = C_Item.GetItemQualityColor(quality or 1)
     return r or 1, g or 1, b or 1
@@ -242,26 +247,25 @@ end
 
 local function RenderInfo(npcID, rare)
     local state = ns.PeekState(npcID)
-    local level = rare.level[1] == rare.level[2] and rare.level[1]
-        or (rare.level[1] .. "-" .. rare.level[2])
     local lines = {
-        ("Level %s |cff66ccff%s|r"):format(level, rare.elite and "Rare Elite" or "Rare"),
-        "Respawn: " .. ns.FormatRespawn(rare),
-        ("Spawn points: %d"):format(#rare.spawns),
+        L["Level %s %s"]:format(ns.FormatLevel(rare), "|cff66ccff" .. ns.FormatRank(rare) .. "|r"),
+        L["Respawn: %s"]:format(ns.FormatRespawn(rare)),
+        L["Spawn points: %d"]:format(#rare.spawns),
     }
     if rare.gold then
-        lines[#lines + 1] = "Money: " .. GetMoneyString(rare.gold[1]) .. " - " .. GetMoneyString(rare.gold[2])
+        local money = GetMoneyString(rare.gold[1]) .. " - " .. GetMoneyString(rare.gold[2])
+        lines[#lines + 1] = L["Money: %s"]:format(money)
     end
     if state and state.lastSeen then
-        lines[#lines + 1] = "|cff88ff88Last seen " .. ns.FormatAgo(state.lastSeen) .. "|r"
+        lines[#lines + 1] = "|cff88ff88" .. L["Last seen %s"]:format(ns.FormatAgo(state.lastSeen)) .. "|r"
     else
-        lines[#lines + 1] = "|cffff5555Never seen|r"
+        lines[#lines + 1] = "|cffff5555" .. L["Never seen"] .. "|r"
     end
-    lines[#lines + 1] = ("Kills: %d"):format(state and state.kills or 0)
+    lines[#lines + 1] = L["Kills: %d"]:format(state and state.kills or 0)
     panel.Info:SetText(table.concat(lines, "\n"))
 end
 
-local function RenderSpells(rare)
+local function RenderSpells(rare, top)
     local shown = 0
     for _, spellID in ipairs(rare.spells) do
         local icon = C_Spell.GetSpellTexture(spellID)
@@ -270,40 +274,68 @@ local function RenderSpells(rare)
             local button = GetSpellButton(shown)
             button.spellID = spellID
             button.Icon:SetTexture(icon)
-            button:SetPoint("TOPLEFT", RIGHT_X + (shown - 1) * (ICON + 4), -50)
+            button:SetPoint("TOPLEFT", RIGHT_X + (shown - 1) * (ICON + 4), top - HEADER_GAP)
             button:Show()
         end
     end
     for i = shown + 1, #spellButtons do spellButtons[i]:Hide() end
 
     local behavior = {}
-    if shown == 0 then behavior[#behavior + 1] = "Melee only, no known abilities." end
-    if rare.flee then behavior[#behavior + 1] = ("Flees at %d%% health."):format(rare.flee) end
+    if rare.unknown then
+        behavior[#behavior + 1] = L["Recorded in game: no ability or loot data yet."]
+    elseif shown == 0 then
+        behavior[#behavior + 1] = L["Melee only, no known abilities."]
+    end
+    if rare.flee then behavior[#behavior + 1] = L["Flees at %d%% health."]:format(rare.flee) end
     local spawn = rare.spawns[1]
     if spawn.path then
-        behavior[#behavior + 1] = "Patrols a fixed route (orange line on the map)."
+        behavior[#behavior + 1] = L["Patrols a fixed route (line on the map)."]
     elseif spawn.wander then
-        behavior[#behavior + 1] = ("Wanders within %d yards (yellow circle on the map)."):format(spawn.wander)
+        behavior[#behavior + 1] = L["Wanders within %d yards (shaded area on the map)."]:format(spawn.wander)
     end
+
+    -- Without ability icons the behavior text moves up right under the header.
+    local textTop = top - HEADER_GAP - (shown > 0 and ICON + 6 or 0)
+    panel.Behavior:ClearAllPoints()
+    panel.Behavior:SetPoint("TOPLEFT", RIGHT_X, textTop)
     panel.Behavior:SetText(table.concat(behavior, " "))
+    return textTop - panel.Behavior:GetStringHeight() - SECTION_GAP
 end
 
-local function RenderLoot(npcID, rare)
+-- Database loot with estimated chances or, for rares recorded in game, the player's own
+-- drops with a rate computed from their kills.
+local function LootList(npcID, rare)
+    if #rare.loot > 0 then return rare.loot, false end
     local state = ns.PeekState(npcID)
-    local top = -32 - 18 - ICON - 40
+    local list = {}
+    if state and state.kills > 0 then
+        for itemID, count in pairs(state.loot) do
+            list[#list + 1] = { itemID, 100 * count / state.kills }
+        end
+        table.sort(list, function(a, b) return a[2] > b[2] end)
+    end
+    return list, true
+end
+
+local function RenderLoot(npcID, rare, top)
+    local state = ns.PeekState(npcID)
+    local loot, personal = LootList(npcID, rare)
+    panel.LootHeader:SetText(personal and L["Your loot (drop rate from your kills)"]
+        or L["Loot (estimated drop chance)"])
     panel.LootHeader:SetPoint("TOPLEFT", RIGHT_X, top)
-    local count = math.min(#rare.loot, LOOT_MAX)
+    panel.LootHeader:SetShown(#loot > 0)
+    local count = math.min(#loot, LOOT_MAX)
     for i = 1, count do
-        local loot = rare.loot[i]
+        local item = loot[i]
         local button = GetLootButton(i)
         local column, row = (i - 1) % LOOT_COLUMNS, math.floor((i - 1) / LOOT_COLUMNS)
-        button:SetPoint("TOPLEFT", RIGHT_X + column * CELL_W, top - 20 - row * CELL_H)
-        button.itemID, button.chance, button.quest = loot[1], loot[2], loot[3]
-        button.looted = state and state.loot[loot[1]] or 0
-        button.Icon:SetTexture(C_Item.GetItemIconByID(loot[1]))
-        button.Border:SetVertexColor(QualityColor(C_Item.GetItemQualityByID(loot[1])))
-        button.Chance:SetText(ns.FormatChance(loot[2]))
-        if loot[3] then
+        button:SetPoint("TOPLEFT", RIGHT_X + column * CELL_W, top - HEADER_GAP - row * CELL_H)
+        button.itemID, button.chance, button.quest, button.personal = item[1], item[2], item[3], personal
+        button.looted = state and state.loot[item[1]] or 0
+        button.Icon:SetTexture(C_Item.GetItemIconByID(item[1]))
+        button.Border:SetVertexColor(QualityColor(C_Item.GetItemQualityByID(item[1])))
+        button.Chance:SetText(ns.FormatChance(item[2]))
+        if item[3] then
             button.Chance:SetTextColor(1, 0.82, 0)  -- quest items in yellow
         else
             button.Chance:SetTextColor(1, 1, 1)
@@ -312,8 +344,8 @@ local function RenderLoot(npcID, rare)
         button:Show()
     end
     for i = count + 1, #lootButtons do lootButtons[i]:Hide() end
-    local rows = math.max(1, math.ceil(count / LOOT_COLUMNS))
-    return top - 20 - rows * CELL_H - 8
+    if count == 0 then return top end
+    return top - HEADER_GAP - math.ceil(count / LOOT_COLUMNS) * CELL_H - 8
 end
 
 local function RenderWorldDrops(rare, top)
@@ -325,9 +357,9 @@ local function RenderWorldDrops(rare, top)
         button.drop = drop
         local r, g, b = QualityColor(drop.q)
         local quality = _G["ITEM_QUALITY" .. drop.q .. "_DESC"] or "?"
-        button.label:SetText(("%s: %s per kill (%d items)"):format(quality, ns.FormatChance(drop.c), drop.n))
+        button.label:SetText(L["%s: %s per kill (%d items)"]:format(quality, ns.FormatChance(drop.c), drop.n))
         button.label:SetTextColor(r, g, b)
-        button:SetPoint("TOPLEFT", RIGHT_X, top - 18 - (i - 1) * 16)
+        button:SetPoint("TOPLEFT", RIGHT_X, top - HEADER_GAP - (i - 1) * 16)
         button:Show()
     end
     for i = #drops + 1, #worldButtons do worldButtons[i]:Hide() end
@@ -337,13 +369,18 @@ local function Render(npcID)
     local rare = ns.Rares[npcID]
     panel.Title:SetText(ns.GetName(npcID))
     panel.Model:ClearModel()
-    panel.Model:SetDisplayInfo(rare.display)
+    if rare.display then
+        panel.Model:SetDisplayInfo(rare.display)
+    else
+        panel.Model:SetCreature(npcID)  -- rares recorded in game have no display ID
+    end
     panel.Model.facing, panel.Model.zoom = 0, 1
     panel.Model:SetFacing(0)
     panel.Model:SetCamDistanceScale(1)
     RenderInfo(npcID, rare)
-    RenderSpells(rare)
-    RenderWorldDrops(rare, RenderLoot(npcID, rare))
+    local top = RenderSpells(rare, CONTENT_TOP)
+    top = RenderLoot(npcID, rare, top)
+    RenderWorldDrops(rare, top)
 end
 
 -- Public API ---------------------------------------------------------------------

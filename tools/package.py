@@ -25,6 +25,8 @@ def build_zip() -> Path:
             if path.is_file():
                 # Forward slashes keep the archive valid for every unzip tool.
                 archive.write(path, path.relative_to(ROOT).as_posix())
+        # The GPL requires the license text to travel with every distributed copy.
+        archive.write(ROOT / "LICENSE", f"{ADDON.name}/LICENSE")
     return target
 
 

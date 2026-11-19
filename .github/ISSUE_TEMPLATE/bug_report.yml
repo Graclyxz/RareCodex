@@ -1,0 +1,25 @@
+name: Bug report / Reportar un error
+description: Something does not work as expected.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened? / ¿Qué pasó?
+      description: What you did, what you expected and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: Lua error / Error de Lua
+      description: If BugSack or the game showed an error, paste the full text here.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: RareCodex version / Versión de RareCodex
+      description: Shown in the AddOns list of the character select screen.
+      placeholder: "0.2.0"
+    validations:
+      required: true

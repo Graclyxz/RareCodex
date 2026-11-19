@@ -10,11 +10,13 @@ tooltips are resolved in-game through the WoW API.
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from sqldump import Row, SqlDump
 
@@ -271,27 +273,33 @@ def lua_items(items: list[LootItem]) -> str:
 
 
 def to_lua(entry: int, rare: dict[str, object]) -> str:
-    level = rare["level"]
-    respawn = rare["respawn"]
-    gold = rare["gold"]
+    """Serialize one rare. level, display, respawn, gold, flee and world are optional
+    (rares recorded in game only have a name, spawns and maybe a level)."""
+    level = rare.get("level")
+    respawn = rare.get("respawn")
+    gold = rare.get("gold")
     spawns = rare["spawns"]
-    world = rare["world"]
-    assert isinstance(level, tuple) and isinstance(respawn, tuple) and isinstance(gold, tuple)
+    world = rare.get("world") or []
     assert isinstance(spawns, list) and isinstance(world, list)
     parts = [
         f"name={lua_str(str(rare['name']))}",
-        f"level={{{level[0]},{level[1]}}}",
-        f"display={rare['display']}",
-        f"respawn={{{respawn[0]},{respawn[1]}}}",
         f"spells={{{','.join(map(str, rare['spells']))}}}",  # type: ignore[call-overload]
         f"loot={lua_items(rare['loot'])}",  # type: ignore[arg-type]
     ]
-    if rare["elite"]:
+    if isinstance(level, tuple):
+        parts.append(f"level={{{level[0]},{level[1]}}}")
+    if rare.get("display"):
+        parts.append(f"display={rare['display']}")
+    if isinstance(respawn, tuple):
+        parts.append(f"respawn={{{respawn[0]},{respawn[1]}}}")
+    if rare.get("elite"):
         parts.append("elite=true")
-    if gold[1]:
+    if isinstance(gold, tuple) and gold[1]:
         parts.append(f"gold={{{gold[0]},{gold[1]}}}")
-    if rare["flee"] is not None:
+    if rare.get("flee") is not None:
         parts.append(f"flee={rare['flee']}")
+    if rare.get("unknown"):
+        parts.append("unknown=true")
     spawn_parts = []
     for s in spawns:
         fields = [str(s["map"]), lua_num(s["x"]), lua_num(s["y"])]
@@ -319,7 +327,8 @@ def to_lua(entry: int, rare: dict[str, object]) -> str:
 
 HEADER = """\
 -- GENERATED FILE - do not edit by hand. Run tools/build_data.py instead.
--- Source: CMaNGOS Classic DB (GPL-3.0). Chances are estimates.
+-- Sources: CMaNGOS Classic DB (GPL-3.0) and data/forever_rares.json (rares recorded in
+-- game, marked unknown=true). Chances are estimates.
 -- spawns: {instanceMapID, worldX, worldY, wander=yards, path={x1,y1,x2,y2,...}}
 -- loot / items: {itemID, chancePercent, isQuestItem}
 -- world: summarized world-drop pools {q=quality, c=chance, n=itemCount, items=...}
@@ -329,6 +338,59 @@ ns.Rares = D
 """
 
 
+def recorded_list(document: Any) -> list[dict[str, Any]]:  # parsed JSON is dynamic
+    """The rare objects of a recorded-rares document: either a bare JSON array (the merged
+    data file) or the in-game export object {"addon", "game", "locale", "rares": [...]}."""
+    if isinstance(document, dict):
+        document = document.get("rares", [])
+    if not isinstance(document, list):
+        raise ValueError("expected a list of rares or an object with a 'rares' list")
+    return document
+
+
+def load_recorded(path: Path, min_reports: int = 1) -> dict[int, dict[str, object]]:
+    """Rares recorded in game (data/forever_rares.json, or an in-game export).
+
+    Each object: {"id", "name", "level" (int or null), "elite", "spawns": [[map, x, y], ...],
+    "reports": [issue numbers]}. Rares confirmed by fewer than min_reports submissions are
+    left out; objects without "reports" (added by hand) count as one report.
+    """
+    if not path.is_file():
+        return {}
+    out: dict[int, dict[str, object]] = {}
+    for rec in recorded_list(json.loads(path.read_text(encoding="utf-8"))):
+        if len(rec.get("reports") or [None]) < min_reports:
+            continue
+        level = rec.get("level")
+        out[int(rec["id"])] = {
+            "name": str(rec["name"]),
+            "level": (int(level), int(level)) if level else None,
+            "elite": bool(rec.get("elite")),
+            "unknown": True,
+            "spells": [],
+            "loot": [],
+            "spawns": [
+                {"map": int(m), "x": float(x), "y": float(y), "wander": 0.0, "path": []}
+                for m, x, y in rec["spawns"]
+            ],
+        }
+    return out
+
+
+def merge_recorded(
+    rares: dict[int, dict[str, object]], recorded: dict[int, dict[str, object]]
+) -> list[int]:
+    """Add recorded rares the database lacks; returns the IDs skipped as already known.
+    Rares without any spawn point cannot be placed on the map and are skipped too."""
+    skipped = []
+    for npc_id, rare in sorted(recorded.items()):
+        if npc_id in rares or not rare["spawns"]:
+            skipped.append(npc_id)
+        else:
+            rares[npc_id] = rare
+    return skipped
+
+
 def write_lua(rares: dict[int, dict[str, object]], path: Path) -> None:
     lines = [HEADER] + [to_lua(e, r) for e, r in rares.items()]
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -336,16 +398,31 @@ def write_lua(rares: dict[int, dict[str, object]], path: Path) -> None:
 
 
 def main() -> None:
+    root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("dump", type=Path, help="CMaNGOS Classic DB .sql dump")
     parser.add_argument(
-        "-o",
-        "--output",
+        "-o", "--output", type=Path, default=root / "RareCodex" / "Data" / "Rares.lua"
+    )
+    parser.add_argument(
+        "--recorded",
         type=Path,
-        default=Path(__file__).resolve().parent.parent / "RareCodex" / "Data" / "Rares.lua",
+        default=root / "data" / "forever_rares.json",
+        help="rares recorded in game and shared by players",
+    )
+    parser.add_argument(
+        "--min-reports",
+        type=int,
+        default=1,
+        help="independent submissions a recorded rare needs before it is included",
     )
     args = parser.parse_args()
     rares = Builder(SqlDump(args.dump, TABLES)).build()
+    recorded = load_recorded(args.recorded, args.min_reports)
+    skipped = merge_recorded(rares, recorded)
+    if skipped:
+        print(f"Skipped recorded rares already in the database or without spawns: {skipped}")
+    print(f"Added {len(recorded) - len(skipped)} rares recorded in game")
     write_lua(rares, args.output)
     paths = sum(1 for r in rares.values() for s in r["spawns"] if s["path"])  # type: ignore[attr-defined]
     print(f"Wrote {len(rares)} rares ({paths} patrol paths) to {args.output}")

@@ -1,6 +1,7 @@
 -- Pins: world map data provider that places one pin per rare. Rares with several possible
 -- spawn points get a count badge; the other points are drawn as dots by the overlay.
 local _, ns = ...
+local L = ns.L
 
 local PIN_TEMPLATE = "RareCodexPinTemplate"
 
@@ -90,7 +91,7 @@ end
 
 function ns.SetWaypoint(uiMapID, x, y)
     if not C_Map.CanSetUserWaypointOnMap(uiMapID) then
-        ns.Print("Waypoints are not allowed on this map.")
+        ns.Print(L["Waypoints are not allowed on this map."])
         return
     end
     C_Map.SetUserWaypoint(UiMapPoint.CreateFromCoordinates(uiMapID, x, y))

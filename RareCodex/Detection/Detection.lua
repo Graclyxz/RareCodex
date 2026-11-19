@@ -1,7 +1,13 @@
 -- Detection: notices rares (vignettes, target, mouseover) and records kills and loot.
+-- Rares missing from the database (e.g. WoW Forever additions) are recorded in
+-- RareCodexDB.unknown so they can be exported with /rc export and added to the data.
 local _, ns = ...
+local L = ns.L
 
 local ALERT_COOLDOWN = 5 * 60
+-- Two sightings on the same map closer than this (normalized map units) are one spot.
+local SAME_SPOT = 0.01
+local RARE_CLASSIFICATIONS = { rare = false, rareelite = true }  -- value = is elite
 local lastAlert = {}
 
 local function Alert(key, name, npcID)
@@ -10,11 +16,11 @@ local function Alert(key, name, npcID)
     if lastAlert[key] and now - lastAlert[key] < ALERT_COOLDOWN then return end
     lastAlert[key] = now
     PlaySound(SOUNDKIT.RAID_WARNING)
-    RaidNotice_AddMessage(RaidWarningFrame, "Rare nearby: " .. name, ChatTypeInfo.RAID_WARNING)
+    RaidNotice_AddMessage(RaidWarningFrame, L["Rare nearby: %s"]:format(name), ChatTypeInfo.RAID_WARNING)
     if npcID then
-        ns.Print(("Rare nearby: |cffffd200%s|r - type /rc %d for details"):format(name, npcID))
+        ns.Print(L["Rare nearby: |cffffd200%s|r - type /rc %d for details"]:format(name, npcID))
     else
-        ns.Print(("Rare nearby: |cffffd200%s|r (not in database yet, recorded)"):format(name))
+        ns.Print(L["Rare nearby: |cffffd200%s|r (not in the database yet, recorded)"]:format(name))
     end
 end
 
@@ -22,17 +28,38 @@ local function MarkSeen(npcID)
     ns.GetState(npcID).lastSeen = time()
 end
 
--- Rares the database does not know (e.g. WoW Forever additions) are stored so they
--- can be added later.
-local function RecordUnknown(npcID, name)
+-- Where the rare is: the vignette's own position when available, else the player's.
+local function SightingPosition(vignetteGUID)
     local mapID = C_Map.GetBestMapForUnit("player")
-    local pos = mapID and C_Map.GetPlayerMapPosition(mapID, "player")
-    local record = ns.db.unknown[npcID] or { name = name, sightings = {} }
-    ns.db.unknown[npcID] = record
-    if pos then
-        local x, y = pos:GetXY()
-        table.insert(record.sightings, { mapID = mapID, x = x, y = y, time = time() })
+    if not mapID then return end
+    local pos = vignetteGUID and C_VignetteInfo.GetVignettePosition(vignetteGUID, mapID)
+    pos = pos or C_Map.GetPlayerMapPosition(mapID, "player")
+    if not pos then return end
+    local x, y = pos:GetXY()
+    return mapID, x, y
+end
+
+local function RecordUnknown(npcID, name, vignetteGUID, details)
+    local record = ns.db.unknown[npcID]
+    if not record then
+        record = { sightings = {} }
+        ns.db.unknown[npcID] = record
+        ns.Contribute.OnNewRare(name)
     end
+    record.name = name or record.name
+    if details then
+        record.level, record.elite = details.level, details.elite
+    end
+    MarkSeen(npcID)
+    local mapID, x, y = SightingPosition(vignetteGUID)
+    if not mapID then return end
+    for _, s in ipairs(record.sightings) do
+        if s.mapID == mapID and (s.x - x) ^ 2 + (s.y - y) ^ 2 < SAME_SPOT ^ 2 then
+            s.time = time()
+            return
+        end
+    end
+    table.insert(record.sightings, { mapID = mapID, x = x, y = y, time = time() })
 end
 
 local function CheckVignette(vignetteGUID)
@@ -44,7 +71,7 @@ local function CheckVignette(vignetteGUID)
         MarkSeen(npcID)
         Alert(npcID, ns.GetName(npcID), npcID)
     elseif info.atlasName and info.atlasName:find("VignetteKill", 1, true) then
-        RecordUnknown(npcID, info.name)
+        RecordUnknown(npcID, info.name, vignetteGUID)
         Alert(npcID, info.name or "?", nil)
     end
 end
@@ -60,13 +87,27 @@ ns.On("VIGNETTES_UPDATED", function()
     end
 end)
 
+-- Targeting or hovering a rare also gives its level and rank, which vignettes lack.
 local function CheckUnit(unit)
     local npcID = ns.NpcIDFromGUID(UnitGUID(unit))
-    if npcID and ns.Rares[npcID] then MarkSeen(npcID) end
+    if not npcID then return end
+    if ns.Rares[npcID] then
+        MarkSeen(npcID)
+        return
+    end
+    local classification = UnitClassification(unit)
+    if ns.IsSecret(classification) or RARE_CLASSIFICATIONS[classification] == nil then return end
+    local level, name = UnitLevel(unit), UnitName(unit)
+    if ns.IsSecret(level) or ns.IsSecret(name) then return end
+    RecordUnknown(npcID, name, nil, { level = level, elite = RARE_CLASSIFICATIONS[classification] })
 end
 
 ns.On("PLAYER_TARGET_CHANGED", function() CheckUnit("target") end)
 ns.On("UPDATE_MOUSEOVER_UNIT", function() CheckUnit("mouseover") end)
+
+local function IsTracked(npcID)
+    return ns.Rares[npcID] or ns.db.unknown[npcID]
+end
 
 -- A kill is counted the first time a rare's corpse is looted; drops are tallied per item.
 ns.On("LOOT_READY", function()
@@ -78,7 +119,7 @@ ns.On("LOOT_READY", function()
         for i = 1, #sources, 2 do
             local guid = sources[i]
             local npcID = ns.NpcIDFromGUID(guid)
-            if npcID and ns.Rares[npcID] and not ns.db.looted[guid] then
+            if npcID and IsTracked(npcID) and not ns.db.looted[guid] then
                 local entry = itemsBySource[guid] or { npcID = npcID, items = {} }
                 itemsBySource[guid] = entry
                 if itemID then entry.items[#entry.items + 1] = itemID end

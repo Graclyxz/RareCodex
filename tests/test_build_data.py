@@ -4,7 +4,9 @@ from lupa import LuaRuntime
 from build_data import (
     LootItem,
     WorldDrop,
+    load_recorded,
     lua_chance,
+    merge_recorded,
     merge_world_drops,
     resolve_chances,
     to_lua,
@@ -76,3 +78,36 @@ def test_generated_lua_loads_with_expected_shape() -> None:
     assert len(spawn["path"]) == 4
     assert data["world"][1]["items"][1][1] == 867
     assert data["world"][2]["items"] is None
+
+
+RECORDED_JSON = """[
+  {"id":900001,"name":"Eck'alom","level":27,"elite":false,"spawns":[[1,2230.5,222.25]]},
+  {"id":5352,"name":"Old Grizzlegut","level":null,"elite":false,"spawns":[[1,1,2]]},
+  {"id":900002,"name":"No spawns","level":null,"elite":true,"spawns":[]}
+]"""
+
+
+def test_recorded_rares_merge_only_when_new_and_placeable(tmp_path) -> None:  # noqa: ANN001
+    path = tmp_path / "forever_rares.json"
+    path.write_text(RECORDED_JSON, encoding="utf-8")
+    recorded = load_recorded(path)
+    rares: dict[int, dict[str, object]] = {5352: {"name": "Old Grizzlegut"}}
+    skipped = merge_recorded(rares, recorded)
+    assert skipped == [5352, 900002]
+    assert rares[900001]["level"] == (27, 27)
+    assert rares[900001]["unknown"] is True
+
+
+def test_missing_recorded_file_is_empty(tmp_path) -> None:  # noqa: ANN001
+    assert load_recorded(tmp_path / "nope.json") == {}
+
+
+def test_recorded_rare_serializes_without_optional_fields(tmp_path) -> None:  # noqa: ANN001
+    path = tmp_path / "forever_rares.json"
+    path.write_text(RECORDED_JSON, encoding="utf-8")
+    rare = load_recorded(path)[900002]
+    rare["spawns"] = [{"map": 1, "x": 1.0, "y": 2.0, "wander": 0.0, "path": []}]
+    lua = LuaRuntime(unpack_returned_tuples=True)
+    data = lua.execute("local D = {}\n" + to_lua(900002, rare) + "\nreturn D")[900002]
+    assert data["unknown"] is True and data["elite"] is True
+    assert data["level"] is None and data["respawn"] is None and data["display"] is None

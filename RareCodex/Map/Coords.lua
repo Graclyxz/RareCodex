@@ -1,5 +1,6 @@
 -- Coords: converts database world coordinates into normalized UI map positions.
 local _, ns = ...
+local L = ns.L
 
 local Coords = {}
 ns.Coords = Coords
@@ -183,13 +184,13 @@ end
 function Coords.Calibrate(verbose)
     local a, b, _, instanceID = UnitPosition("player")
     if not a or ns.IsSecret(a) then
-        if verbose then ns.Print("Calibration unavailable here (UnitPosition restricted).") end
+        if verbose then ns.Print(L["Calibration unavailable here (UnitPosition restricted)."]) end
         return false
     end
     local mapID = C_Map.GetBestMapForUnit("player")
     local playerPos = mapID and C_Map.GetPlayerMapPosition(mapID, "player")
     if not playerPos then
-        if verbose then ns.Print("Calibration unavailable: no player map position.") end
+        if verbose then ns.Print(L["Calibration unavailable: no player map position."]) end
         return false
     end
     local px, py = playerPos:GetXY()
@@ -203,11 +204,11 @@ function Coords.Calibrate(verbose)
     local direct, swapped = ErrorFor(CreateVector2D(a, b)), ErrorFor(CreateVector2D(b, a))
     local best = math.min(direct, swapped)
     if verbose then
-        ns.Print(("Calibration: direct error %.6f, swapped error %.6f, current setting: %s"):format(
-            direct, swapped, ns.db.axisSwapped and "swapped" or "direct"))
+        ns.Print(L["Calibration: direct error %.6f, swapped error %.6f, current setting: %s"]:format(
+            direct, swapped, ns.db.axisSwapped and L["swapped"] or L["direct"]))
     end
     if best > CALIBRATION_MAX_ERROR then
-        if verbose then ns.Print("Neither axis order matches; please report this.") end
+        if verbose then ns.Print(L["Neither axis order matches; please report this."]) end
         return false
     end
     local isSwapped = swapped < direct

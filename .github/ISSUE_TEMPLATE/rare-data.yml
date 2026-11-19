@@ -1,0 +1,35 @@
+name: Share rare data / Compartir datos de raros
+description: Rares recorded in game by RareCodex that are not in the database yet.
+title: "[Rare data] "
+labels: ["rare-data"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping improve RareCodex! / ¡Gracias por ayudar a mejorar RareCodex!
+
+        In game, open the sharing window from the chat link or with `/rc share`, copy the data
+        and paste it below. A bot checks it and prepares the update automatically.
+
+        En el juego, abre la ventana desde el enlace del chat o con `/rc share`, copia los datos
+        y pégalos abajo. Un bot los revisa y prepara la actualización automáticamente.
+  - type: textarea
+    id: data
+    attributes:
+      label: Data
+      description: Paste the text copied from the RareCodex window. / Pega el texto copiado de la ventana de RareCodex.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes / Notas
+      description: Optional. Anything useful about these rares (respawn time, abilities...). / Opcional.
+  - type: checkboxes
+    id: license
+    attributes:
+      label: License / Licencia
+      options:
+        - label: I agree to share this data under the project's GPL-3.0 license. / Acepto compartir estos datos bajo la licencia GPL-3.0 del proyecto.
+          required: true

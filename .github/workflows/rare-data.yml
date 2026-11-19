@@ -1,0 +1,69 @@
+# Turns a "Share rare data" issue into a pull request that merges the data into
+# data/forever_rares.json, or comments the validation errors on the issue.
+name: Rare data submission
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: rare-data-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  ingest:
+    if: contains(github.event.issue.labels.*.name, 'rare-data')
+    runs-on: ubuntu-latest
+    env:
+      ISSUE: ${{ github.event.issue.number }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # The issue body is untrusted: it only ever reaches the script through a file.
+      - name: Validate and merge the submission
+        id: ingest
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          printf '%s' "$ISSUE_BODY" > "$RUNNER_TEMP/body.md"
+          status=0
+          python3 tools/ingest_submission.py --issue "$ISSUE" \
+            --body "$RUNNER_TEMP/body.md" --report "$RUNNER_TEMP/report.md" || status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          cat "$RUNNER_TEMP/report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Prepare the pull request description
+        if: steps.ingest.outputs.status == '0'
+        run: printf '\nCloses #%s\n' "$ISSUE" >> "$RUNNER_TEMP/report.md"
+
+      - name: Open or update the pull request
+        if: steps.ingest.outputs.status == '0'
+        id: pr
+        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7.0.11
+        with:
+          branch: rare-data/issue-${{ github.event.issue.number }}
+          commit-message: "Add rare data from #${{ github.event.issue.number }}"
+          title: "Rare data from #${{ github.event.issue.number }}"
+          body-path: ${{ runner.temp }}/report.md
+          add-paths: data/forever_rares.json
+          labels: rare-data
+          delete-branch: true
+
+      - name: Reply on the issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATUS: ${{ steps.ingest.outputs.status }}
+          PR_URL: ${{ steps.pr.outputs.pull-request-url }}
+        run: |
+          if [ "$STATUS" != "0" ]; then
+            gh issue comment "$ISSUE" --body-file "$RUNNER_TEMP/report.md"
+          elif [ -n "$PR_URL" ]; then
+            gh issue comment "$ISSUE" --body "Thank you! Your data passed validation and is ready for review: $PR_URL"
+          else
+            gh issue comment "$ISSUE" --body "Thank you! Everything in this submission was already known, so there is nothing to add."
+          fi
