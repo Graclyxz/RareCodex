@@ -12,6 +12,8 @@ local DEFAULTS = {
     axisSwapped = nil,  -- world coordinate order, set by Coords.Calibrate()
     show = { zone = true, continent = false, world = false },  -- pins per map scope
     showPaths = true,
+    showSpawnCount = false,  -- number of possible spawn points on the pin
+    showSpawnArea = false,   -- outline enclosing all of a rare's possible spawn points
     alerts = true,
 }
 

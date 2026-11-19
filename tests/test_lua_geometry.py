@@ -68,6 +68,23 @@ def test_simplify_keeps_tiny_closed_shapes(overlay) -> None:  # noqa: ANN001
     assert as_list(mod._Simplify(to_lua(lua, pts), True, 5)) == pts
 
 
+def test_convex_hull_drops_inner_points(overlay) -> None:  # noqa: ANN001
+    lua, mod = overlay
+    square_with_center = [0, 0, 10, 0, 10, 10, 0, 10, 5, 5, 5, 0]
+    hull = as_list(mod._ConvexHull(to_lua(lua, square_with_center)))
+    corners = {(hull[i], hull[i + 1]) for i in range(0, len(hull), 2)}
+    assert corners == {(0, 0), (10, 0), (10, 10), (0, 10)}
+
+
+def test_spawn_area_pads_two_points_into_a_capsule(overlay) -> None:  # noqa: ANN001
+    lua, mod = overlay
+    area = as_list(mod._SpawnArea(to_lua(lua, [0, 0, 100, 0]), 10))
+    xs, ys = area[0::2], area[1::2]
+    assert len(area) % 2 == 0 and len(xs) > 4
+    assert min(xs) == pytest.approx(-10) and max(xs) == pytest.approx(110)
+    assert min(ys) == pytest.approx(-10, abs=0.5) and max(ys) == pytest.approx(10, abs=0.5)
+
+
 def test_cap_points_marks_ends_and_sharp_turns_only(overlay) -> None:  # noqa: ANN001
     lua, mod = overlay
     # straight, straight, then a U-turn: ends + the turn-back point need caps

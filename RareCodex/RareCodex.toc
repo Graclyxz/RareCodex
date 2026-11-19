@@ -2,7 +2,7 @@
 ## Title: RareCodex
 ## Notes: Rare mob atlas: 3D models, abilities, patrol paths and loot with drop chances.
 ## Author: Graclyxz
-## Version: 0.1.8
+## Version: 0.1.10
 ## SavedVariables: RareCodexDB
 ## IconTexture: Interface\Icons\INV_Misc_Book_09
 

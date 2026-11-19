@@ -1,4 +1,5 @@
--- Pins: world map data provider that places one pin per rare spawn point.
+-- Pins: world map data provider that places one pin per rare. Rares with several possible
+-- spawn points get a count badge; the other points are drawn as dots by the overlay.
 local _, ns = ...
 
 local PIN_TEMPLATE = "RareCodexPinTemplate"
@@ -11,16 +12,18 @@ function RareCodexPinMixin:OnLoad()
     self:SetScalingLimits(1, 1.0, 1.25)
 end
 
-function RareCodexPinMixin:OnAcquired(entry)
-    self.entry = entry
-    self:SetPosition(entry.x, entry.y)
-    local rare = ns.Rares[entry.npcID]
+function RareCodexPinMixin:OnAcquired(group)
+    self.group = group
+    self:SetPosition(group.primary.x, group.primary.y)
+    local rare = ns.Rares[group.npcID]
     self.Icon:SetAtlas(rare.elite and "VignetteKillElite" or "VignetteKill")
+    local showCount = ns.db.showSpawnCount and #group.entries > 1
+    self.Count:SetText(showCount and #group.entries or "")
 end
 
 function RareCodexPinMixin:OnMouseEnter()
-    ns.Tooltip.ShowRare(self, self.entry.npcID)
-    ns.Overlay.Highlight(self:GetMap(), self.entry)
+    ns.Tooltip.ShowRare(self, self.group.npcID)
+    ns.Overlay.Highlight(self:GetMap(), self.group)
 end
 
 function RareCodexPinMixin:OnMouseLeave()
@@ -34,11 +37,11 @@ function RareCodexPinMixin:HandleClick(button)
     local now = GetTime()
     if self.lastClick == now then return end
     self.lastClick = now
-    local entry = self.entry
+    local group = self.group
     if button == "LeftButton" and IsShiftKeyDown() then
-        ns.SetWaypoint(self:GetMap():GetMapID(), entry.x, entry.y)
+        ns.SetWaypoint(self:GetMap():GetMapID(), group.primary.x, group.primary.y)
     elseif button == "LeftButton" then
-        ns.DetailPanel.Show(entry.npcID)
+        ns.DetailPanel.Show(group.npcID)
     elseif button == "RightButton" then
         local map = self:GetMap()
         if map.NavigateToParentMap then map:NavigateToParentMap() end
@@ -67,11 +70,11 @@ function Provider:RefreshAllData()
     if not mapID or not ns.db then return end
     local scope = ns.Coords.ScopeOfMap(mapID)
     if not scope or not ns.db.show[scope] then return end
-    local entries = ns.Coords.EntriesForMap(mapID)
-    -- Patrol lines only on zone maps: on continents they are unreadable and expensive.
-    if scope == "zone" then ns.Overlay.Draw(map, mapID, entries) end
-    for _, entry in ipairs(entries) do
-        map:AcquirePin(PIN_TEMPLATE, entry)
+    local groups = ns.Coords.GroupsForMap(mapID)
+    -- Routes and spawn dots only on zone maps: on continents they are unreadable and expensive.
+    if scope == "zone" then ns.Overlay.Draw(map, mapID, groups) end
+    for _, group in ipairs(groups) do
+        map:AcquirePin(PIN_TEMPLATE, group)
     end
 end
 

@@ -9,6 +9,7 @@ local CALIBRATION_MAX_ERROR = 1e-4
 
 local zoneCache = {}   -- [spawn] = zone uiMapID under the spawn point, or false
 local entryCache = {}  -- [uiMapID] = list of { npcID, spawn, x, y }
+local groupCache = {}  -- [uiMapID] = list of { npcID, primary, entries }
 
 local SCOPE_BY_MAP_TYPE = {
     [Enum.UIMapType.World] = "world",
@@ -107,6 +108,38 @@ function Coords.EntriesForMap(uiMapID)
     return entries
 end
 
+--- One group per rare on uiMapID. Rares often spawn at one of several points; the group's
+--- primary entry is the point closest to their centroid, so a single pin sits in the middle
+--- of the rare's spawn area. entries lists every point, primary first.
+function Coords.GroupsForMap(uiMapID)
+    local cached = groupCache[uiMapID]
+    if cached then return cached end
+    local byRare, groups = {}, {}
+    for _, entry in ipairs(Coords.EntriesForMap(uiMapID)) do
+        local group = byRare[entry.npcID]
+        if not group then
+            group = { npcID = entry.npcID, entries = {} }
+            byRare[entry.npcID] = group
+            groups[#groups + 1] = group
+        end
+        group.entries[#group.entries + 1] = entry
+    end
+    for _, group in ipairs(groups) do
+        local cx, cy = 0, 0
+        for _, e in ipairs(group.entries) do cx, cy = cx + e.x, cy + e.y end
+        cx, cy = cx / #group.entries, cy / #group.entries
+        local bestIndex, bestDist = 1, math.huge
+        for i, e in ipairs(group.entries) do
+            local d = (e.x - cx) ^ 2 + (e.y - cy) ^ 2
+            if d < bestDist then bestIndex, bestDist = i, d end
+        end
+        group.primary = table.remove(group.entries, bestIndex)
+        table.insert(group.entries, 1, group.primary)
+    end
+    groupCache[uiMapID] = groups
+    return groups
+end
+
 --- Flat list {x1, y1, x2, y2, ...} describing the spawn's patrol path or wander area.
 --- Returns points, isClosed.
 function Coords.ShapeForSpawn(spawn, uiMapID)
@@ -142,6 +175,7 @@ end
 function Coords.Invalidate()
     wipe(zoneCache)
     wipe(entryCache)
+    wipe(groupCache)
     if ns.RefreshMap then ns.RefreshMap() end
 end
 

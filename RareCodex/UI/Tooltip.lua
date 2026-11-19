@@ -23,6 +23,10 @@ function Tooltip.ShowRare(owner, npcID)
         or (rare.level[1] .. "-" .. rare.level[2])
     GameTooltip:AddLine(("Level %s %s"):format(level, rare.elite and "Rare Elite" or "Rare"), 1, 1, 1)
     GameTooltip:AddDoubleLine("Respawn", ns.FormatRespawn(rare), MUTED[1], MUTED[2], MUTED[3], 1, 1, 1)
+    if #rare.spawns > 1 then
+        GameTooltip:AddLine(("Spawns at one of %d points (dots on the map)"):format(#rare.spawns),
+            MUTED[1], MUTED[2], MUTED[3])
+    end
 
     local spells = {}
     for _, spellID in ipairs(rare.spells) do

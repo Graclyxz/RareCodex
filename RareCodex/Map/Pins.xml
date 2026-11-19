@@ -7,6 +7,14 @@
             <Layer level="ARTWORK">
                 <Texture parentKey="Icon" setAllPoints="true"/>
             </Layer>
+            <Layer level="OVERLAY">
+                <!-- Number of possible spawn points, empty when there is only one -->
+                <FontString parentKey="Count" inherits="NumberFontNormalSmall">
+                    <Anchors>
+                        <Anchor point="BOTTOMRIGHT" x="5" y="-3"/>
+                    </Anchors>
+                </FontString>
+            </Layer>
         </Layers>
         <!-- Only OnLoad here: the map canvas installs its own mouse scripts and asserts that
              pins define none. It then calls the mixin's OnMouseEnter/OnMouseLeave/click methods. -->
