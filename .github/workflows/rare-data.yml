@@ -41,7 +41,9 @@ jobs:
 
       - name: Prepare the pull request description
         if: steps.ingest.outputs.status == '0'
-        run: printf '\nCloses #%s\n' "$ISSUE" >> "$RUNNER_TEMP/report.md"
+        # Block scalar on purpose: in a plain YAML value " #" would start a comment.
+        run: |
+          printf '\nCloses #%s\n' "$ISSUE" >> "$RUNNER_TEMP/report.md"
 
       - name: Open or update the pull request
         if: steps.ingest.outputs.status == '0'
