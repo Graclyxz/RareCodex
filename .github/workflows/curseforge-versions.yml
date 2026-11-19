@@ -33,4 +33,4 @@ jobs:
               https://wow.curseforge.com/api/game/versions |
               jq -r --arg f "$FILTER" \
                 '.[] | select(.name | contains($f)) | "| \(.id) | \(.name) | \(.gameVersionTypeID) |"'
-          } >> "$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY"  # also in the log, which the API can read
