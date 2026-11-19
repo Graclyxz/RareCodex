@@ -11,8 +11,7 @@ local CHECKBOXES = {
       set = function(v) ns.db.show.world = v end },
     { section = "Display" },
     { label = "Patrol routes and wander areas on zone maps", get = function() return ns.db.showPaths end,
-      set = function(v) ns.db.showPaths = v end },
-    { section = "Alerts" },
+      set = function(v) ns.db.showPaths = v end },    { section = "Alerts" },
     { label = "Sound and on-screen warning when a rare appears", get = function() return ns.db.alerts end,
       set = function(v) ns.db.alerts = v end },
 }

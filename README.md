@@ -85,6 +85,7 @@ uv sync                                  # install dev dependencies
 uv run pytest                            # run tests
 uv run ruff check tools tests            # lint
 uv run python tools/package.py           # build dist/RareCodex-<version>.zip
+uv run python tools/make_textures.py     # regenerate Media/*.tga route textures
 ```
 
 ### Regenerating the rare database
