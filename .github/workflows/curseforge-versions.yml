@@ -1,0 +1,36 @@
+# Manual helper: lists CurseForge's World of Warcraft game versions so the right IDs can be
+# stored in the CF_GAME_VERSIONS repository variable. Run it from the Actions tab.
+name: CurseForge game versions
+
+on:
+  workflow_dispatch:
+    inputs:
+      filter:
+        description: Only show versions whose name contains this text (empty = all)
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  list:
+    runs-on: ubuntu-latest
+    steps:
+      - name: List game versions
+        env:
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+          FILTER: ${{ inputs.filter }}
+        run: |
+          if [ -z "$CF_API_KEY" ]; then
+            echo "Set the CF_API_KEY secret first." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          {
+            echo "| ID | Name | Type |"
+            echo "|---|---|---|"
+            curl --fail-with-body -sS -H "X-Api-Token: $CF_API_KEY" \
+              https://wow.curseforge.com/api/game/versions |
+              jq -r --arg f "$FILTER" \
+                '.[] | select(.name | contains($f)) | "| \(.id) | \(.name) | \(.gameVersionTypeID) |"'
+          } >> "$GITHUB_STEP_SUMMARY"

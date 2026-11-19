@@ -1,6 +1,11 @@
-# Pushing a tag like v0.2.0 or v0.2.0-alpha builds the zip and publishes a GitHub release.
-# Tags with a suffix (-alpha, -beta) are marked as pre-releases.
-# TODO: upload to CurseForge once the project exists (needs its project ID and an API token).
+# Pushing a tag like v0.2.0 or v0.2.0-beta builds the zip, publishes a GitHub release and,
+# when configured, uploads it to CurseForge. Tags with a suffix (-alpha, -beta) are
+# pre-releases on GitHub and alpha/beta files on CurseForge.
+#
+# CurseForge setup (the upload is skipped until all three exist):
+#   secret   CF_API_KEY        API token from authors.curseforge.com/account/api-tokens
+#   variable CF_PROJECT_ID     numeric project ID shown on the CurseForge project page
+#   variable CF_GAME_VERSIONS  comma-separated game version IDs (see curseforge-versions.yml)
 name: Release
 
 on:
@@ -37,3 +42,46 @@ jobs:
           case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
           gh release create "$GITHUB_REF_NAME" dist/*.zip $prerelease \
             --title "RareCodex ${GITHUB_REF_NAME#v}" --generate-notes
+
+      # Secrets cannot be tested in `if:`, so this step reports whether CurseForge is set up.
+      # The token is only exposed to this step and the upload, never to third-party actions.
+      - name: Check CurseForge configuration
+        id: curseforge
+        env:
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+          CF_PROJECT_ID: ${{ vars.CF_PROJECT_ID }}
+          CF_GAME_VERSIONS: ${{ vars.CF_GAME_VERSIONS }}
+        run: |
+          if [ -n "$CF_API_KEY" ] && [ -n "$CF_PROJECT_ID" ] && [ -n "$CF_GAME_VERSIONS" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "CurseForge is not configured; skipping the upload." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload to CurseForge
+        if: steps.curseforge.outputs.configured == 'true'
+        env:
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+          CF_PROJECT_ID: ${{ vars.CF_PROJECT_ID }}
+          CF_GAME_VERSIONS: ${{ vars.CF_GAME_VERSIONS }}
+        run: |
+          case "$GITHUB_REF_NAME" in
+            *-alpha*) release_type=alpha ;;
+            *-beta*) release_type=beta ;;
+            *) release_type=release ;;
+          esac
+          release_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME"
+          metadata=$(jq -n \
+            --arg name "RareCodex ${GITHUB_REF_NAME#v}" \
+            --arg type "$release_type" \
+            --arg versions "$CF_GAME_VERSIONS" \
+            --arg changelog "Changes: $release_url" \
+            '{displayName: $name, releaseType: $type, changelog: $changelog,
+              changelogType: "markdown",
+              gameVersions: ($versions | split(",") | map(gsub(" "; "") | tonumber))}')
+          zip=$(ls dist/*.zip)
+          curl --fail-with-body -sS \
+            -H "X-Api-Token: $CF_API_KEY" \
+            --form-string "metadata=$metadata" \
+            -F "file=@$zip" \
+            "https://wow.curseforge.com/api/projects/$CF_PROJECT_ID/upload-file"
