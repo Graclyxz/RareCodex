@@ -1,0 +1,373 @@
+-- DetailPanel: full view of one rare - 3D model, abilities, behavior, loot and world drops.
+local _, ns = ...
+
+local DetailPanel = {}
+ns.DetailPanel = DetailPanel
+
+local WIDTH, HEIGHT = 640, 480
+local PAD = 12
+local MODEL_W, MODEL_H = 230, 290
+local RIGHT_X = PAD + MODEL_W + 16
+local ICON = 32
+local CELL_W, CELL_H = 42, 50
+local LOOT_COLUMNS = 8
+local LOOT_MAX = 24
+local SPELL_MAX = 9
+local WORLD_LIST_MAX = 20
+local WOWHEAD_URL = "https://www.wowhead.com/classic/npc=%d"
+
+local panel
+local currentID
+local spellButtons, lootButtons, worldButtons = {}, {}, {}
+
+-- Widgets ------------------------------------------------------------------------
+local function Header(parent, text)
+    local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    fs:SetText(text)
+    return fs
+end
+
+local function CreateModel(parent)
+    local bg = parent:CreateTexture(nil, "BACKGROUND")
+    bg:SetColorTexture(0.05, 0.05, 0.08, 0.9)
+    bg:SetPoint("TOPLEFT", PAD, -32)
+    bg:SetSize(MODEL_W, MODEL_H)
+
+    local model = CreateFrame("PlayerModel", nil, parent)
+    model:SetAllPoints(bg)
+    model:EnableMouse(true)
+    model:EnableMouseWheel(true)
+    model.facing, model.zoom = 0, 1
+    model:SetScript("OnMouseDown", function(self) self.dragX = GetCursorPosition() end)
+    model:SetScript("OnMouseUp", function(self) self.dragX = nil end)
+    model:SetScript("OnUpdate", function(self)
+        if not self.dragX then return end
+        local x = GetCursorPosition()
+        self.facing = self.facing + (x - self.dragX) * 0.02
+        self.dragX = x
+        self:SetFacing(self.facing)
+    end)
+    model:SetScript("OnMouseWheel", function(self, delta)
+        self.zoom = math.min(2.5, math.max(0.4, self.zoom + delta * 0.15))
+        self:SetCamDistanceScale(1 / self.zoom)
+    end)
+
+    local hint = model:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    hint:SetPoint("BOTTOM", 0, 4)
+    hint:SetText("Drag to rotate, wheel to zoom")
+    return model
+end
+
+local function ShowItemTooltip(self)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:SetItemByID(self.itemID)
+    GameTooltip:AddLine(" ")
+    GameTooltip:AddDoubleLine("Estimated drop chance", ns.FormatChance(self.chance), 0.7, 0.7, 0.7, 1, 1, 1)
+    if self.quest then GameTooltip:AddLine("Quest item: only drops while on the quest", 1, 0.82, 0) end
+    if self.looted and self.looted > 0 then
+        GameTooltip:AddDoubleLine("You looted", self.looted, 0.7, 0.7, 0.7, 0.4, 1, 0.4)
+    end
+    GameTooltip:Show()
+end
+
+local function ShowSpellTooltip(self)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:SetSpellByID(self.spellID)
+    GameTooltip:Show()
+end
+
+local function HideTooltip() GameTooltip:Hide() end
+
+local function GetSpellButton(i)
+    local button = spellButtons[i]
+    if not button then
+        button = CreateFrame("Button", nil, panel)
+        button:SetSize(ICON, ICON)
+        button.Icon = button:CreateTexture(nil, "ARTWORK")
+        button.Icon:SetAllPoints()
+        button:SetScript("OnEnter", ShowSpellTooltip)
+        button:SetScript("OnLeave", HideTooltip)
+        spellButtons[i] = button
+    end
+    return button
+end
+
+local function GetLootButton(i)
+    local button = lootButtons[i]
+    if not button then
+        button = CreateFrame("Button", nil, panel)
+        button:SetSize(ICON, ICON)
+        button.Icon = button:CreateTexture(nil, "ARTWORK")
+        button.Icon:SetAllPoints()
+        button.Border = button:CreateTexture(nil, "OVERLAY")
+        button.Border:SetTexture("Interface\\Common\\WhiteIconFrame")
+        button.Border:SetAllPoints()
+        button.Chance = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        button.Chance:SetPoint("TOP", button, "BOTTOM", 0, -2)
+        button.Count = button:CreateFontString(nil, "OVERLAY", "NumberFontNormalSmall")
+        button.Count:SetPoint("BOTTOMRIGHT", -1, 1)
+        button:SetScript("OnEnter", ShowItemTooltip)
+        button:SetScript("OnLeave", HideTooltip)
+        button:SetScript("OnClick", function(self)
+            local _, link = C_Item.GetItemInfo(self.itemID)
+            if link then HandleModifiedItemClick(link) end
+        end)
+        lootButtons[i] = button
+    end
+    return button
+end
+
+local function ShowWorldTooltip(self)
+    local drop = self.drop
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:AddLine(self.label:GetText())
+    if drop.items then
+        for i, loot in ipairs(drop.items) do
+            if i > WORLD_LIST_MAX then
+                GameTooltip:AddLine(("... and %d more"):format(#drop.items - WORLD_LIST_MAX), 0.7, 0.7, 0.7)
+                break
+            end
+            local name, link = C_Item.GetItemInfo(loot[1])
+            GameTooltip:AddDoubleLine(link or name or ("item:" .. loot[1]), ns.FormatChance(loot[2]))
+        end
+    else
+        GameTooltip:AddLine(("Random pick from %d items of this quality."):format(drop.n), 0.7, 0.7, 0.7, true)
+    end
+    GameTooltip:Show()
+end
+
+local function GetWorldButton(i)
+    local button = worldButtons[i]
+    if not button then
+        button = CreateFrame("Button", nil, panel)
+        button:SetSize(WIDTH - RIGHT_X - PAD, 16)
+        button.label = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        button.label:SetPoint("LEFT")
+        button:SetScript("OnEnter", ShowWorldTooltip)
+        button:SetScript("OnLeave", HideTooltip)
+        worldButtons[i] = button
+    end
+    return button
+end
+
+local function ShowUrl(url)
+    StaticPopup_Show("RARECODEX_URL", nil, nil, url)
+end
+
+StaticPopupDialogs.RARECODEX_URL = {
+    text = "Copy the link (Ctrl+C):",
+    button1 = CLOSE,
+    hasEditBox = true,
+    editBoxWidth = 320,
+    OnShow = function(self, url)
+        local editBox = self.EditBox or self.editBox
+        editBox:SetText(url)
+        editBox:HighlightText()
+        editBox:SetFocus()
+    end,
+    EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+}
+
+local function PrimarySpawnOnMap(npcID)
+    local spawn = ns.Rares[npcID].spawns[1]
+    local mapID = ns.Coords.ZoneOfSpawn(spawn)
+    if not mapID then return end
+    local x, y = ns.Coords.WorldToMap(spawn[1], spawn[2], spawn[3], mapID)
+    return mapID, x, y
+end
+
+local function CreatePanel()
+    panel = CreateFrame("Frame", "RareCodexDetailPanel", UIParent, "BasicFrameTemplateWithInset")
+    panel:SetSize(WIDTH, HEIGHT)
+    panel:SetPoint("CENTER")
+    panel:SetFrameStrata("HIGH")
+    panel:SetMovable(true)
+    panel:EnableMouse(true)
+    panel:RegisterForDrag("LeftButton")
+    panel:SetScript("OnDragStart", panel.StartMoving)
+    panel:SetScript("OnDragStop", panel.StopMovingOrSizing)
+    panel:Hide()
+    table.insert(UISpecialFrames, "RareCodexDetailPanel")
+
+    panel.Title = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    panel.Title:SetPoint("TOP", 0, -5)
+
+    panel.Model = CreateModel(panel)
+
+    panel.Info = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    panel.Info:SetPoint("TOPLEFT", PAD, -32 - MODEL_H - 10)
+    panel.Info:SetWidth(MODEL_W)
+    panel.Info:SetJustifyH("LEFT")
+    panel.Info:SetSpacing(3)
+
+    panel.AbilitiesHeader = Header(panel, "Abilities")
+    panel.AbilitiesHeader:SetPoint("TOPLEFT", RIGHT_X, -32)
+
+    panel.Behavior = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    panel.Behavior:SetPoint("TOPLEFT", RIGHT_X, -32 - 18 - ICON - 6)
+    panel.Behavior:SetWidth(WIDTH - RIGHT_X - PAD)
+    panel.Behavior:SetJustifyH("LEFT")
+
+    panel.LootHeader = Header(panel, "Loot (estimated drop chance)")
+    panel.WorldHeader = Header(panel, "World drops")
+
+    local buttons = {
+        { "Show on map", function()
+            local mapID = PrimarySpawnOnMap(currentID)
+            if mapID then OpenWorldMap(mapID) end
+        end },
+        { "Waypoint", function()
+            local mapID, x, y = PrimarySpawnOnMap(currentID)
+            if mapID and x then ns.SetWaypoint(mapID, x, y) end
+        end },
+        { "Wowhead link", function() ShowUrl(WOWHEAD_URL:format(currentID)) end },
+    }
+    for i, def in ipairs(buttons) do
+        local button = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        button:SetSize(120, 22)
+        button:SetPoint("BOTTOMRIGHT", -PAD - (i - 1) * 126, PAD)
+        button:SetText(def[1])
+        button:SetScript("OnClick", def[2])
+    end
+end
+
+-- Rendering ----------------------------------------------------------------------
+local function QualityColor(quality)
+    local r, g, b = C_Item.GetItemQualityColor(quality or 1)
+    return r or 1, g or 1, b or 1
+end
+
+local function RenderInfo(npcID, rare)
+    local state = ns.PeekState(npcID)
+    local level = rare.level[1] == rare.level[2] and rare.level[1]
+        or (rare.level[1] .. "-" .. rare.level[2])
+    local lines = {
+        ("Level %s |cff66ccff%s|r"):format(level, rare.elite and "Rare Elite" or "Rare"),
+        "Respawn: " .. ns.FormatRespawn(rare),
+        ("Spawn points: %d"):format(#rare.spawns),
+    }
+    if rare.gold then
+        lines[#lines + 1] = "Money: " .. GetMoneyString(rare.gold[1]) .. " - " .. GetMoneyString(rare.gold[2])
+    end
+    if state and state.lastSeen then
+        lines[#lines + 1] = "|cff88ff88Last seen " .. ns.FormatAgo(state.lastSeen) .. "|r"
+    else
+        lines[#lines + 1] = "|cffff5555Never seen|r"
+    end
+    lines[#lines + 1] = ("Kills: %d"):format(state and state.kills or 0)
+    panel.Info:SetText(table.concat(lines, "\n"))
+end
+
+local function RenderSpells(rare)
+    local shown = 0
+    for _, spellID in ipairs(rare.spells) do
+        local icon = C_Spell.GetSpellTexture(spellID)
+        if icon and shown < SPELL_MAX then
+            shown = shown + 1
+            local button = GetSpellButton(shown)
+            button.spellID = spellID
+            button.Icon:SetTexture(icon)
+            button:SetPoint("TOPLEFT", RIGHT_X + (shown - 1) * (ICON + 4), -50)
+            button:Show()
+        end
+    end
+    for i = shown + 1, #spellButtons do spellButtons[i]:Hide() end
+
+    local behavior = {}
+    if shown == 0 then behavior[#behavior + 1] = "Melee only, no known abilities." end
+    if rare.flee then behavior[#behavior + 1] = ("Flees at %d%% health."):format(rare.flee) end
+    local spawn = rare.spawns[1]
+    if spawn.path then
+        behavior[#behavior + 1] = "Patrols a fixed route (orange line on the map)."
+    elseif spawn.wander then
+        behavior[#behavior + 1] = ("Wanders within %d yards (yellow circle on the map)."):format(spawn.wander)
+    end
+    panel.Behavior:SetText(table.concat(behavior, " "))
+end
+
+local function RenderLoot(npcID, rare)
+    local state = ns.PeekState(npcID)
+    local top = -32 - 18 - ICON - 40
+    panel.LootHeader:SetPoint("TOPLEFT", RIGHT_X, top)
+    local count = math.min(#rare.loot, LOOT_MAX)
+    for i = 1, count do
+        local loot = rare.loot[i]
+        local button = GetLootButton(i)
+        local column, row = (i - 1) % LOOT_COLUMNS, math.floor((i - 1) / LOOT_COLUMNS)
+        button:SetPoint("TOPLEFT", RIGHT_X + column * CELL_W, top - 20 - row * CELL_H)
+        button.itemID, button.chance, button.quest = loot[1], loot[2], loot[3]
+        button.looted = state and state.loot[loot[1]] or 0
+        button.Icon:SetTexture(C_Item.GetItemIconByID(loot[1]))
+        button.Border:SetVertexColor(QualityColor(C_Item.GetItemQualityByID(loot[1])))
+        button.Chance:SetText(ns.FormatChance(loot[2]))
+        if loot[3] then
+            button.Chance:SetTextColor(1, 0.82, 0)  -- quest items in yellow
+        else
+            button.Chance:SetTextColor(1, 1, 1)
+        end
+        button.Count:SetText(button.looted > 0 and ("x" .. button.looted) or "")
+        button:Show()
+    end
+    for i = count + 1, #lootButtons do lootButtons[i]:Hide() end
+    local rows = math.max(1, math.ceil(count / LOOT_COLUMNS))
+    return top - 20 - rows * CELL_H - 8
+end
+
+local function RenderWorldDrops(rare, top)
+    panel.WorldHeader:SetPoint("TOPLEFT", RIGHT_X, top)
+    local drops = rare.world or {}
+    panel.WorldHeader:SetShown(#drops > 0)
+    for i, drop in ipairs(drops) do
+        local button = GetWorldButton(i)
+        button.drop = drop
+        local r, g, b = QualityColor(drop.q)
+        local quality = _G["ITEM_QUALITY" .. drop.q .. "_DESC"] or "?"
+        button.label:SetText(("%s: %s per kill (%d items)"):format(quality, ns.FormatChance(drop.c), drop.n))
+        button.label:SetTextColor(r, g, b)
+        button:SetPoint("TOPLEFT", RIGHT_X, top - 18 - (i - 1) * 16)
+        button:Show()
+    end
+    for i = #drops + 1, #worldButtons do worldButtons[i]:Hide() end
+end
+
+local function Render(npcID)
+    local rare = ns.Rares[npcID]
+    panel.Title:SetText(ns.GetName(npcID))
+    panel.Model:ClearModel()
+    panel.Model:SetDisplayInfo(rare.display)
+    panel.Model.facing, panel.Model.zoom = 0, 1
+    panel.Model:SetFacing(0)
+    panel.Model:SetCamDistanceScale(1)
+    RenderInfo(npcID, rare)
+    RenderSpells(rare)
+    RenderWorldDrops(rare, RenderLoot(npcID, rare))
+end
+
+-- Public API ---------------------------------------------------------------------
+function DetailPanel.Show(npcID)
+    if not ns.Rares[npcID] then return end
+    if not panel then CreatePanel() end
+    currentID = npcID
+    for _, loot in ipairs(ns.Rares[npcID].loot) do C_Item.RequestLoadItemDataByID(loot[1]) end
+    Render(npcID)
+    panel:Show()
+end
+
+function DetailPanel.Refresh(npcID)
+    if panel and panel:IsShown() and (npcID == nil or npcID == currentID) then
+        Render(currentID)
+    end
+end
+
+local refreshPending = false
+ns.On("GET_ITEM_INFO_RECEIVED", function()
+    if refreshPending or not (panel and panel:IsShown()) then return end
+    refreshPending = true
+    C_Timer.After(0.3, function()
+        refreshPending = false
+        DetailPanel.Refresh()
+    end)
+end)

@@ -1,0 +1,22 @@
+[project]
+name = "rarecodex-tools"
+version = "0.1.0"
+description = "Data generator for the RareCodex World of Warcraft addon"
+requires-python = ">=3.12"
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6", "lupa>=2"]
+
+[tool.pytest.ini_options]
+pythonpath = ["tools"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+src = ["tools", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pyright]
+extraPaths = ["tools"]
