@@ -37,6 +37,8 @@ def test_invalid_json_is_reported() -> None:
         ({"id": True}, "invalid id"),
         ({"name": ""}, "invalid name"),
         ({"name": "x" * 101}, "invalid name"),
+        ({"name": "Line\nbreak"}, "invalid characters"),
+        ({"name": "|cffff0000Red|r"}, "invalid characters"),
         ({"level": 500}, "invalid level"),
         ({"spawns": [[1, 10.0]]}, "malformed spawn"),
         ({"spawns": [[1, 1e9, 0]]}, "out of range"),

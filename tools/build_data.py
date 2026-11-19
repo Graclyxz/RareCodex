@@ -248,7 +248,17 @@ class Builder:
 
 # --- Lua serialization -------------------------------------------------------
 def lua_str(value: str) -> str:
-    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    """Quoted Lua string literal. Control characters become \\ddd escapes, so any input
+    (including hand-edited data) yields valid Lua that cannot break out of the string."""
+    out = []
+    for char in value:
+        if char in ('"', "\\"):
+            out.append("\\" + char)
+        elif ord(char) < 32 or ord(char) == 127:
+            out.append(f"\\{ord(char):03d}")
+        else:
+            out.append(char)
+    return '"' + "".join(out) + '"'
 
 
 def lua_num(value: float) -> str:

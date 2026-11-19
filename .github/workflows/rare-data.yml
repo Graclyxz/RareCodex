@@ -1,10 +1,12 @@
 # Turns a "Share rare data" issue into a pull request that merges the data into
 # data/forever_rares.json, or comments the validation errors on the issue.
+# Only newly opened issues are processed: reacting to edits would let a submitter change a
+# pull request after it was reviewed. Corrections go in a new issue.
 name: Rare data submission
 
 on:
   issues:
-    types: [opened, edited]
+    types: [opened]
 
 permissions:
   contents: write

@@ -111,3 +111,20 @@ def test_recorded_rare_serializes_without_optional_fields(tmp_path) -> None:  # 
     data = lua.execute("local D = {}\n" + to_lua(900002, rare) + "\nreturn D")[900002]
     assert data["unknown"] is True and data["elite"] is True
     assert data["level"] is None and data["respawn"] is None and data["display"] is None
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        'Evil"\nos.exit() --',  # newline + quote: tries to end the string and inject code
+        "back\slash\\",
+        "tab\tbell\a\x7f",
+        "Ünïcödé Eck'alom",
+    ],
+)
+def test_lua_str_round_trips_any_name(name: str) -> None:
+    from build_data import lua_str
+
+    literal = lua_str(name)
+    assert "\n" not in literal
+    assert LuaRuntime().execute(f"return {literal}") == name

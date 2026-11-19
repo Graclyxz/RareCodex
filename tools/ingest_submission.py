@@ -97,6 +97,9 @@ def validate(document: Any) -> list[dict[str, Any]]:
         name = rec.get("name")
         if not isinstance(name, str) or not name.strip() or len(name) > MAX_NAME:
             raise SubmissionError(f"{where} ({npc_id}) has an invalid name.")
+        # "|" starts WoW escape sequences (colors, links, textures) in game text.
+        if not name.isprintable() or "|" in name:
+            raise SubmissionError(f"{where} ({npc_id}) has invalid characters in its name.")
         level = rec.get("level")
         if level is not None and (
             isinstance(level, bool) or not isinstance(level, int) or not 0 < level <= MAX_LEVEL
@@ -187,7 +190,7 @@ def main() -> int:
         emit(
             f"### Could not process this submission\n\n{exc}\n\n"
             "Please copy the data again from the RareCodex window in game "
-            "(`/rc share`) and edit this issue.\n"
+            "(`/rc share`) and open a new issue with it.\n"
         )
         return 1
     existing = recorded_list(json.loads(args.data.read_text(encoding="utf-8")))
