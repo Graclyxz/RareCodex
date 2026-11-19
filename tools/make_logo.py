@@ -77,8 +77,9 @@ def draw_book(draw: ImageDraw.ImageDraw) -> None:
         if side == -1:
             for i in range(5):
                 y = top + 40 + i * 22
-                draw.line((px(cx - 100), px(y), px(cx - 24), px(y + 6)), fill=PARCHMENT_SHADE,
-                          width=px(5))
+                draw.line(
+                    (px(cx - 100), px(y), px(cx - 24), px(y + 6)), fill=PARCHMENT_SHADE, width=px(5)
+                )
     draw.line((px(cx), px(top + 14), px(cx), px(bottom)), fill=GOLD, width=px(5))
 
 
@@ -112,10 +113,12 @@ def main() -> None:
     img = radial_background().convert("RGBA")
     draw = ImageDraw.Draw(img)
     ring = 14
-    draw.ellipse((px(ring), px(ring), px(SIZE - ring), px(SIZE - ring)), outline=GOLD,
-                 width=px(7))
-    draw.ellipse((px(ring + 12), px(ring + 12), px(SIZE - ring - 12), px(SIZE - ring - 12)),
-                 outline=(*GOLD, 110), width=px(2))
+    draw.ellipse((px(ring), px(ring), px(SIZE - ring), px(SIZE - ring)), outline=GOLD, width=px(7))
+    draw.ellipse(
+        (px(ring + 12), px(ring + 12), px(SIZE - ring - 12), px(SIZE - ring - 12)),
+        outline=(*GOLD, 110),
+        width=px(2),
+    )
     draw_book(draw)
     draw_route(draw)
     img = draw_star(img)
