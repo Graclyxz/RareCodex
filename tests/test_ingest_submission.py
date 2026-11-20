@@ -115,7 +115,41 @@ def test_tracks_are_validated_and_merged_without_duplicates() -> None:
     merge(data, validate(submission({**RARE, "tracks": [TRACK]})), issue=1)
     other = [1, 50.0, 50.0, 60.0, 50.0]
     merge(data, validate(submission({**RARE, "tracks": [TRACK, other]})), issue=2)
-    assert data[0]["tracks"] == [TRACK, other]
+    assert data[0]["tracks"] == [
+        {"issue": 1, "points": TRACK},
+        {"issue": 2, "points": other},
+    ]
+
+
+def test_repeated_rare_in_one_submission_is_rejected() -> None:
+    with pytest.raises(SubmissionError, match="more than once"):
+        validate(submission(RARE, RARE))
+
+
+def test_full_rare_keeps_existing_tracks_and_drops_new_ones() -> None:
+    from ingest_submission import MAX_STORED_TRACKS
+
+    data: list[dict] = []
+    first = [[1, float(i), 0.0, float(i) + 1, 0.0] for i in range(MAX_STORED_TRACKS)]
+    for start in range(0, MAX_STORED_TRACKS, 20):  # one submission holds at most 20 tracks
+        merge(data, validate(submission({**RARE, "tracks": first[start : start + 20]})), issue=1)
+    longest_possible = [1, *([5000.0] * 600)]
+    report = merge(data, validate(submission({**RARE, "tracks": [longest_possible]})), issue=2)
+    assert [t["points"] for t in data[0]["tracks"]] == first
+    assert report.dropped_tracks == 1
+    assert "Tracks not stored (1)" in report.markdown(2)
+
+
+def test_generator_reads_stored_tracks_with_provenance(tmp_path: Path) -> None:
+    from build_data import load_recorded
+
+    data: list[dict] = []
+    track = [1, *[v for i in range(10) for v in (5.0 * i, 0.0)]]
+    merge(data, validate(submission({**RARE, "tracks": [track]})), issue=3)
+    path = tmp_path / "forever_rares.json"
+    path.write_text(dump(data), encoding="utf-8")
+    spawn = load_recorded(path)[RARE["id"]]["spawns"][0]
+    assert len(spawn["path"]) == 10  # type: ignore[index]
 
 
 @pytest.mark.parametrize(

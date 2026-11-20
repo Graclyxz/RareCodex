@@ -26,7 +26,7 @@ MAX_RARES = 200
 MAX_SPAWNS = 50
 MAX_TRACKS = 20  # per rare in one submission
 MAX_TRACK_POINTS = 300
-MAX_STORED_TRACKS = 30  # per rare in the data file; the longest are kept
+MAX_STORED_TRACKS = 30  # per rare in the data file; later tracks are dropped, never swapped in
 MAX_NAME = 100
 MAX_LEVEL = 100
 MAX_COORD = 20000.0
@@ -45,6 +45,7 @@ class Report:
     added: list[str] = field(default_factory=list)
     updated: list[str] = field(default_factory=list)
     unchanged: list[str] = field(default_factory=list)
+    dropped_tracks: int = 0
 
     def markdown(self, issue: int) -> str:
         lines = [f"### Rare data from #{issue}", ""]
@@ -55,6 +56,11 @@ class Report:
         ):
             if items:
                 lines.append(f"**{title} ({len(items)}):** " + ", ".join(items))
+        if self.dropped_tracks:
+            lines.append(
+                f"**Tracks not stored ({self.dropped_tracks}):** the rare already has "
+                f"{MAX_STORED_TRACKS} tracks."
+            )
         return "\n".join(lines) + "\n"
 
 
@@ -90,6 +96,7 @@ def validate(document: Any) -> list[dict[str, Any]]:
     if len(rares) > MAX_RARES:
         raise SubmissionError(f"Too many rares in one submission (max {MAX_RARES}).")
     out = []
+    seen_ids: set[int] = set()
     for index, rec in enumerate(rares, 1):
         where = f"Rare #{index}"
         if not isinstance(rec, dict):
@@ -97,6 +104,10 @@ def validate(document: Any) -> list[dict[str, Any]]:
         npc_id = rec.get("id")
         if isinstance(npc_id, bool) or not isinstance(npc_id, int) or not 0 < npc_id < MAX_NPC_ID:
             raise SubmissionError(f"{where} has an invalid id.")
+        # Repeating a rare would multiply the per-rare limits (tracks, spawns).
+        if npc_id in seen_ids:
+            raise SubmissionError(f"{where} ({npc_id}) appears more than once.")
+        seen_ids.add(npc_id)
         name = rec.get("name")
         if not isinstance(name, str) or not name.strip() or len(name) > MAX_NAME:
             raise SubmissionError(f"{where} ({npc_id}) has an invalid name.")
@@ -156,17 +167,37 @@ def _near(a: list[Any], b: list[Any]) -> bool:
     return a[0] == b[0] and math.hypot(a[1] - b[1], a[2] - b[2]) < MERGE_DISTANCE
 
 
+def _add_tracks(stored: list[dict[str, Any]], tracks: list[list[float]], issue: int) -> int:
+    """Store new tracks with the issue that reported them; returns how many were dropped.
+    Once a rare is full, new tracks are dropped: existing data is never displaced, so one
+    submission cannot push out tracks that others reported."""
+    dropped = 0
+    known = [t["points"] for t in stored]
+    for track in tracks:
+        if track in known:
+            continue
+        if len(stored) >= MAX_STORED_TRACKS:
+            dropped += 1
+            continue
+        stored.append({"issue": issue, "points": track})
+        known.append(track)
+    return dropped
+
+
 def merge(existing: list[dict[str, Any]], incoming: list[dict[str, Any]], issue: int) -> Report:
     """Merge incoming rares into existing (in place). Spawn points are unioned, a missing
-    level is filled in, and the issue number is recorded once per rare as a report."""
+    level is filled in, tracks are added with their issue, and the issue number is recorded
+    once per rare as a report."""
     by_id = {rec["id"]: rec for rec in existing}
     report = Report()
     for rec in incoming:
         label = f"{rec['name']} ({rec['id']})"
         current = by_id.get(rec["id"])
         if current is None:
-            existing.append({**rec, "reports": [issue]})
-            by_id[rec["id"]] = existing[-1]
+            new = {**rec, "tracks": [], "reports": [issue]}
+            report.dropped_tracks += _add_tracks(new["tracks"], rec["tracks"], issue)
+            existing.append(new)
+            by_id[rec["id"]] = new
             report.added.append(label)
             continue
         changed = False
@@ -177,14 +208,10 @@ def merge(existing: list[dict[str, Any]], incoming: list[dict[str, Any]], issue:
         if current.get("level") is None and rec["level"] is not None:
             current["level"] = rec["level"]
             changed = True
-        tracks = current.setdefault("tracks", [])
-        for track in rec["tracks"]:
-            if track not in tracks:
-                tracks.append(track)
-                changed = True
-        if len(tracks) > MAX_STORED_TRACKS:
-            tracks.sort(key=len, reverse=True)
-            del tracks[MAX_STORED_TRACKS:]
+        stored = current.setdefault("tracks", [])
+        before = len(stored)
+        report.dropped_tracks += _add_tracks(stored, rec["tracks"], issue)
+        changed = changed or len(stored) > before
         reports = current.setdefault("reports", [])
         if issue not in reports:
             reports.append(issue)

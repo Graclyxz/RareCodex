@@ -437,10 +437,12 @@ def attach_routes(rare: dict[str, object], tracks: list[Track]) -> None:
             spawns.append({"map": m, "x": pts[0][0], "y": pts[0][1], "wander": 0.0, "path": pts})
 
 
-def _parse_tracks(raw: list[list[float]]) -> list[Track]:
-    """[[map, x1, y1, x2, y2, ...], ...] -> [(map, [(x1, y1), ...]), ...]"""
+def _parse_tracks(raw: list[Any]) -> list[Track]:
+    """[[map, x1, y1, ...], ...] (in-game export) or [{"issue", "points": [map, x1, y1, ...]},
+    ...] (data file, which keeps who reported each track) -> [(map, [(x1, y1), ...]), ...]"""
     tracks: list[Track] = []
-    for t in raw:
+    for entry in raw:
+        t = entry["points"] if isinstance(entry, dict) else entry
         coords = [float(v) for v in t[1:]]
         tracks.append((int(t[0]), list(zip(coords[0::2], coords[1::2], strict=True))))
     return tracks
