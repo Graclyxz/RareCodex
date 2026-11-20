@@ -54,7 +54,9 @@ jobs:
           commit-message: "Add rare data from #${{ github.event.issue.number }}"
           title: "Rare data from #${{ github.event.issue.number }}"
           body-path: ${{ runner.temp }}/report.md
-          add-paths: data/forever_rares.json
+          add-paths: |
+            data/forever_rares.json
+            data/forever_loot.json
           labels: rare-data
           delete-branch: true
 

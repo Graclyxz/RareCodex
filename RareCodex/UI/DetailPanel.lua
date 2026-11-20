@@ -67,7 +67,12 @@ local function ShowItemTooltip(self)
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
     GameTooltip:SetItemByID(self.itemID)
     GameTooltip:AddLine(" ")
-    local label = self.personal and L["Your drop rate"] or L["Estimated drop chance"]
+    local label = L["Estimated drop chance"]
+    if self.personal then
+        label = L["Your drop rate"]
+    elseif self.observed then
+        label = L["Drop rate in WoW Forever"]
+    end
     GameTooltip:AddDoubleLine(label, ns.FormatChance(self.chance), 0.7, 0.7, 0.7, 1, 1, 1)
     if self.quest then GameTooltip:AddLine(L["Quest item: only drops while on the quest"], 1, 0.82, 0) end
     if self.looted and self.looted > 0 then
@@ -320,8 +325,14 @@ end
 local function RenderLoot(npcID, rare, top)
     local state = ns.PeekState(npcID)
     local loot, personal = LootList(npcID, rare)
-    panel.LootHeader:SetText(personal and L["Your loot (drop rate from your kills)"]
-        or L["Loot (estimated drop chance)"])
+    if personal then
+        panel.LootHeader:SetText(L["Your loot (drop rate from your kills)"])
+    elseif rare.forever then
+        -- Chances measured by players in WoW Forever (items they never saw keep the estimate).
+        panel.LootHeader:SetText(L["Loot (WoW Forever data from %d kills)"]:format(rare.forever))
+    else
+        panel.LootHeader:SetText(L["Loot (estimated drop chance)"])
+    end
     panel.LootHeader:SetPoint("TOPLEFT", RIGHT_X, top)
     panel.LootHeader:SetShown(#loot > 0)
     local count = math.min(#loot, LOOT_MAX)
@@ -331,6 +342,7 @@ local function RenderLoot(npcID, rare, top)
         local column, row = (i - 1) % LOOT_COLUMNS, math.floor((i - 1) / LOOT_COLUMNS)
         button:SetPoint("TOPLEFT", RIGHT_X + column * CELL_W, top - HEADER_GAP - row * CELL_H)
         button.itemID, button.chance, button.quest, button.personal = item[1], item[2], item[3], personal
+        button.observed = item[4]  -- chance measured in WoW Forever rather than estimated
         button.looted = state and state.loot[item[1]] or 0
         button.Icon:SetTexture(C_Item.GetItemIconByID(item[1]))
         button.Border:SetVertexColor(QualityColor(C_Item.GetItemQualityByID(item[1])))

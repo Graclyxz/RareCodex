@@ -210,3 +210,48 @@ def test_merge_recorded_promotes_database_creatures_with_player_routes(tmp_path)
     assert len(rares[3736]["spawns"][0]["path"]) == 30  # type: ignore[index]
     assert rares[900001]["unknown"] is True
     assert "tracks" not in rares[3736] and "tracks" not in rares[900001]
+
+
+# --- drop chances measured in WoW Forever -----------------------------------------
+def test_lua_item_flags() -> None:
+    from build_data import lua_item
+
+    assert lua_item(LootItem(1, 50)) == "{1,50}"
+    assert lua_item(LootItem(1, 50, quest=True)) == "{1,50,true}"
+    assert lua_item(LootItem(1, 50, observed=True)) == "{1,50,false,true}"
+    assert lua_item(LootItem(1, 50, quest=True, observed=True)) == "{1,50,true,true}"
+
+
+def known_rare() -> dict[str, object]:
+    return {"loot": [LootItem(10, 20.0), LootItem(11, 5.0)]}
+
+
+def test_known_rare_needs_min_kills_before_measured_chances_apply() -> None:
+    from build_data import apply_forever_loot
+
+    rares = {1: known_rare()}
+    assert apply_forever_loot(rares, {1: (5, {10: 4})}, min_kills=20) == []
+    assert rares[1]["loot"][0].chance == 20.0  # type: ignore[index]
+
+
+def test_measured_chances_replace_estimates_and_add_repeated_new_items() -> None:
+    from build_data import apply_forever_loot
+
+    rares = {1: known_rare()}
+    stats = {1: (40, {10: 4, 99: 2, 98: 1})}  # 99 seen twice, 98 once (random world drop)
+    assert apply_forever_loot(rares, stats, min_kills=20) == [1]
+    loot = {i.item: i for i in rares[1]["loot"]}  # type: ignore[attr-defined]
+    assert loot[10].chance == 10.0 and loot[10].observed
+    assert loot[11].chance == 5.0 and not loot[11].observed  # never seen: keeps the estimate
+    assert loot[99].chance == 5.0 and loot[99].observed
+    assert 98 not in loot
+    assert rares[1]["forever"] == 40
+
+
+def test_rare_without_loot_table_uses_measurements_from_the_first_kill() -> None:
+    from build_data import apply_forever_loot
+
+    rares: dict[int, dict[str, object]] = {2: {"loot": [], "unknown": True}}
+    assert apply_forever_loot(rares, {2: (2, {50: 1})}, min_kills=20) == [2]
+    assert rares[2]["loot"] == [LootItem(50, 50.0, observed=True)]
+    assert rares[2]["forever"] == 2

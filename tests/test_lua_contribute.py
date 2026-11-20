@@ -6,7 +6,7 @@ from pathlib import Path
 from lupa import LuaRuntime
 
 from build_data import load_recorded
-from ingest_submission import validate
+from ingest_submission import validate, validate_submission
 
 CONTRIBUTE = Path(__file__).resolve().parent.parent / "RareCodex" / "UI" / "Contribute.lua"
 
@@ -113,3 +113,15 @@ def test_export_includes_tracks_in_world_coordinates() -> None:
     rare = json.loads(export(db))["rares"][0]
     assert rare["tracks"] == [[1, 500.0, 250.0, 510.0, 250.0, 520.0, 260.0]]
     assert validate({"rares": [rare]})[0]["tracks"] == rare["tracks"]
+
+
+def test_loot_export_sends_only_kills_not_shared_yet() -> None:
+    db = """{ unknown = {}, npcs = {
+        [3736] = { kills = 5, loot = { [2592] = 2, [4606] = 3 },
+                   shared = { kills = 2, loot = { [2592] = 2, [4606] = 1 } } },
+        [100] = { kills = 1, loot = {}, shared = { kills = 1, loot = {} } },  -- all shared
+    } }"""
+    lua, contribute = load_contribute(db)
+    document = json.loads(contribute.BuildJson(lua.table(), contribute.PendingLoot()))
+    assert document["kills"] == [{"id": 3736, "kills": 3, "loot": {"4606": 2}}]
+    assert validate_submission(document)[1] == document["kills"]

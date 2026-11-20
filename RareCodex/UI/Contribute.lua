@@ -12,6 +12,7 @@ local SUBMIT_URL = "https://github.com/Graclyxz/RareCodex/issues/new?template=ra
 local LINK = "addon:" .. addonName .. ":contribute"
 local MERGE_DISTANCE = 25     -- yards; closer sightings are the same spawn point
 local LOGIN_REMINDER_DELAY = 10
+local LOOT_REMINDER_KILLS = 10  -- only remind about loot data once it is worth a submission
 
 local frame
 
@@ -81,9 +82,65 @@ function Contribute.PendingIDs(includeShared)
     return ids
 end
 
---- JSON document for the given npcIDs: addon/game metadata plus one object per rare.
---- Nothing that identifies the player is included.
-function Contribute.BuildJson(ids)
+-- Loot statistics ----------------------------------------------------------------------
+-- Kills and drops of every rare (known or not) feed the real WoW Forever drop chances.
+-- state.shared holds what was already sent, so each kill is shared exactly once.
+
+--- Kills and loot not shared yet, as { npcID, kills, loot = { [itemID] = count } }.
+function Contribute.PendingLoot()
+    local out = {}
+    for npcID, state in pairs(ns.db.npcs) do
+        local shared = state.shared or { kills = 0, loot = {} }
+        local kills = (state.kills or 0) - shared.kills
+        if kills > 0 then
+            local loot = {}
+            for itemID, count in pairs(state.loot or {}) do
+                local new = count - (shared.loot[itemID] or 0)
+                if new > 0 then loot[itemID] = new end
+            end
+            out[#out + 1] = { npcID = npcID, kills = kills, loot = loot }
+        end
+    end
+    table.sort(out, function(a, b) return a.npcID < b.npcID end)
+    return out
+end
+
+local function KillCount(entries)
+    local total = 0
+    for _, entry in ipairs(entries) do total = total + entry.kills end
+    return total
+end
+
+-- Adds exactly what was exported to the shared snapshot (not the live counters, which may
+-- have grown while the window was open).
+local function MarkLootShared(entries)
+    for _, entry in ipairs(entries) do
+        local state = ns.db.npcs[entry.npcID]
+        state.shared = state.shared or { kills = 0, loot = {} }
+        state.shared.kills = state.shared.kills + entry.kills
+        for itemID, count in pairs(entry.loot) do
+            state.shared.loot[itemID] = (state.shared.loot[itemID] or 0) + count
+        end
+    end
+end
+
+local function LootJson(entries)
+    local lines = {}
+    for _, entry in ipairs(entries) do
+        local items = {}
+        for itemID, count in pairs(entry.loot) do
+            items[#items + 1] = ('"%d":%d'):format(itemID, count)
+        end
+        table.sort(items)
+        lines[#lines + 1] = ('    {"id":%d,"kills":%d,"loot":{%s}}'):format(
+            entry.npcID, entry.kills, table.concat(items, ","))
+    end
+    return table.concat(lines, ",\n")
+end
+
+--- JSON document: addon/game metadata, the recorded rares in ids and the loot statistics in
+--- loot (from PendingLoot). Nothing that identifies the player is included.
+function Contribute.BuildJson(ids, loot)
     local lines = {}
     for _, npcID in ipairs(ids) do
         local record = ns.db.unknown[npcID]
@@ -101,8 +158,9 @@ function Contribute.BuildJson(ids)
     local version = C_AddOns and C_AddOns.GetAddOnMetadata(addonName, "Version") or "?"
     local build = GetBuildInfo and table.concat({ GetBuildInfo() }, " ", 1, 2) or "?"
     local locale = GetLocale and GetLocale() or "?"
-    return ('{\n  "addon":%s,\n  "game":%s,\n  "locale":%s,\n  "rares":[\n%s\n  ]\n}\n'):format(
-        JsonString(version), JsonString(build), JsonString(locale), table.concat(lines, ",\n"))
+    return ('{\n  "addon":%s,\n  "game":%s,\n  "locale":%s,\n  "rares":[\n%s\n  ],\n  "kills":[\n%s\n  ]\n}\n'):format(
+        JsonString(version), JsonString(build), JsonString(locale), table.concat(lines, ",\n"),
+        LootJson(loot or {}))
 end
 
 -- Window -----------------------------------------------------------------------------
@@ -197,6 +255,7 @@ local function Create()
     done:SetText(L["Done, I sent it"])
     done:SetScript("OnClick", function()
         for _, npcID in ipairs(frame.ids or {}) do ns.db.unknown[npcID].shared = true end
+        MarkLootShared(frame.loot or {})
         ns.Print(L["Thank you for helping improve RareCodex!"])
         frame:Hide()
     end)
@@ -212,18 +271,30 @@ function Contribute.Show()
     if not frame then Create() end
     local ids = Contribute.PendingIDs(false)
     local pending = #ids
+    -- Recorded rares may be sent again; loot never is, or kills would be counted twice.
     if pending == 0 then ids = Contribute.PendingIDs(true) end
-    frame.ids = ids
-    if #ids == 0 then
-        frame.Intro:SetText(L["No rares recorded yet. They are saved when a rare missing from the database appears on your minimap or you target it."])
-    elseif pending == 0 then
-        frame.Intro:SetText(L["You already shared all your recorded rares (%d). You can send them again if needed."]:format(#ids))
-    else
-        frame.Intro:SetText(L["You discovered %d rares that are not in the database yet. Sharing them adds them to RareCodex for everyone."]:format(pending))
+    local loot = Contribute.PendingLoot()
+    local kills = KillCount(loot)
+    frame.ids, frame.loot = ids, loot
+
+    local intro = {}
+    if pending > 0 then
+        intro[#intro + 1] = L["You discovered %d rares that are not in the database yet. Sharing them adds them to RareCodex for everyone."]:format(pending)
+    elseif #ids > 0 then
+        intro[#intro + 1] = L["You already shared all your recorded rares (%d). You can send them again if needed."]:format(#ids)
     end
-    frame.json = #ids > 0 and Contribute.BuildJson(ids) or ""
+    if kills > 0 then
+        intro[#intro + 1] = L["Your loot from %d rare kills is included too: it helps calculate the real drop chances in WoW Forever."]:format(kills)
+    end
+    if #intro == 0 then
+        intro[1] = L["No rares recorded yet. They are saved when a rare missing from the database appears on your minimap or you target it."]
+    end
+    frame.Intro:SetText(table.concat(intro, " "))
+
+    local hasData = #ids > 0 or #loot > 0
+    frame.json = hasData and Contribute.BuildJson(ids, loot) or ""
     frame.Edit:SetText(frame.json)
-    frame.Done:SetEnabled(#ids > 0)
+    frame.Done:SetEnabled(hasData)
     frame:Show()
 end
 
@@ -246,8 +317,11 @@ end
 ns.On("PLAYER_LOGIN", function()
     C_Timer.After(LOGIN_REMINDER_DELAY, function()
         local pending = #Contribute.PendingIDs(false)
+        local kills = KillCount(Contribute.PendingLoot())
         if pending > 0 then
             Remind(L["You have %d recorded rares that are not in the database yet."]:format(pending))
+        elseif kills >= LOOT_REMINDER_KILLS then
+            Remind(L["You have loot data from %d rare kills that is not shared yet."]:format(kills))
         end
     end)
 end)

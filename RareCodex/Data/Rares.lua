@@ -2,7 +2,8 @@
 -- Sources: CMaNGOS Classic DB (GPL-3.0) and data/forever_rares.json (rares recorded in
 -- game, marked unknown=true). Chances are estimates.
 -- spawns: {instanceMapID, worldX, worldY, wander=yards, path={x1,y1,x2,y2,...}}
--- loot / items: {itemID, chancePercent, isQuestItem}
+-- loot / items: {itemID, chancePercent, isQuestItem, measuredInForever}
+-- forever: kills behind the measured chances (data/forever_loot.json)
 -- world: summarized world-drop pools {q=quality, c=chance, n=itemCount, items=...}
 local _, ns = ...
 local D = {}

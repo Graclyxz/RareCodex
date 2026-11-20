@@ -166,3 +166,59 @@ def test_generator_reads_stored_tracks_with_provenance(tmp_path: Path) -> None:
 def test_bad_tracks_are_rejected(tracks: object, message: str) -> None:
     with pytest.raises(SubmissionError, match=message):
         validate(submission({**RARE, "tracks": tracks}))
+
+
+# --- loot statistics -----------------------------------------------------------------
+KILLS = {"id": 3736, "kills": 3, "loot": {"2592": 1, "4606": 2}}
+
+
+def test_submission_with_only_loot_is_valid() -> None:
+    from ingest_submission import validate_submission
+
+    rares, kills = validate_submission({"rares": [], "kills": [KILLS]})
+    assert rares == [] and kills == [KILLS]
+
+
+def test_empty_submission_is_rejected() -> None:
+    from ingest_submission import validate_submission
+
+    with pytest.raises(SubmissionError, match="no rares and no loot"):
+        validate_submission({"rares": [], "kills": []})
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"id": 0}, "invalid id"),
+        ({"kills": 0}, "invalid number of kills"),
+        ({"kills": 201}, "invalid number of kills"),
+        ({"loot": []}, "invalid loot"),
+        ({"loot": {"abc": 1}}, "invalid item id"),
+        ({"loot": {"2592": 10}}, "invalid count"),  # 10 > 3 kills * 3
+        ({"loot": {"2592": 0}}, "invalid count"),
+    ],
+)
+def test_bad_loot_is_rejected(change: dict, message: str) -> None:
+    from ingest_submission import validate_kills
+
+    with pytest.raises(SubmissionError, match=message):
+        validate_kills({"kills": [{**KILLS, **change}]})
+
+
+def test_repeated_rare_in_loot_is_rejected() -> None:
+    from ingest_submission import validate_kills
+
+    with pytest.raises(SubmissionError, match="more than once"):
+        validate_kills({"kills": [KILLS, KILLS]})
+
+
+def test_loot_accumulates_across_issues_and_counts_each_issue_once() -> None:
+    from ingest_submission import dump_loot, merge_loot
+
+    stats: dict = {}
+    assert merge_loot(stats, [KILLS], issue=1).kills == 3
+    merge_loot(stats, [{"id": 3736, "kills": 2, "loot": {"2592": 1}}], issue=2)
+    again = merge_loot(stats, [KILLS], issue=1)
+    assert again.kills == 0 and again.already_counted == 1
+    assert stats["3736"] == {"kills": 5, "loot": {"2592": 2, "4606": 2}, "reports": [1, 2]}
+    assert json.loads(dump_loot(stats)) == stats

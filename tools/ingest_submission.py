@@ -1,7 +1,8 @@
-"""Validate a rare-data submission (GitHub issue body) and merge it into the data file.
+"""Validate a rare-data submission (GitHub issue body) and merge it into the data files:
+recorded rares into data/forever_rares.json, kill and loot counts into data/forever_loot.json.
 
 Used by .github/workflows/rare-data.yml:
-    python tools/ingest_submission.py --issue 42 --body body.md [--data data/forever_rares.json]
+    python tools/ingest_submission.py --issue 42 --body body.md
 
 Writes a Markdown report to --report (default: stdout) and exits with status 1 when the
 submission is invalid, so the workflow can comment the errors on the issue instead of
@@ -17,7 +18,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 from build_data import recorded_list
 
@@ -32,6 +33,12 @@ MAX_LEVEL = 100
 MAX_COORD = 20000.0
 MAX_NPC_ID = 10_000_000
 MERGE_DISTANCE = 25.0  # yards; spawn points closer than this are the same point
+# Loot statistics: per-submission limits keep one report from swamping the shared numbers.
+MAX_KILL_ENTRIES = 500
+MAX_KILLS_PER_RARE = 200
+MAX_LOOT_ITEMS = 60
+MAX_DROPS_PER_KILL = 3  # an item's count can be at most this many times the kills
+MAX_ITEM_ID = 10_000_000
 
 _FENCE = re.compile(r"```(?:json)?\s*\n(.*?)\n```", re.S)
 
@@ -85,13 +92,13 @@ def _number(value: Any, what: str, limit: float) -> float:
     return float(value)
 
 
-def validate(document: Any) -> list[dict[str, Any]]:
+def validate(document: Any, allow_empty: bool = False) -> list[dict[str, Any]]:
     """Normalized rares from a submission; raises SubmissionError on any problem."""
     try:
         rares = recorded_list(document)
     except ValueError as exc:
         raise SubmissionError(str(exc)) from exc
-    if not rares:
+    if not rares and not allow_empty:
         raise SubmissionError("The submission contains no rares.")
     if len(rares) > MAX_RARES:
         raise SubmissionError(f"Too many rares in one submission (max {MAX_RARES}).")
@@ -163,6 +170,93 @@ def _validate_tracks(tracks: Any, where: str) -> list[list[float]]:
     return clean
 
 
+def _positive_int(value: Any, limit: int) -> TypeGuard[int]:
+    return not isinstance(value, bool) and isinstance(value, int) and 0 < value <= limit
+
+
+def validate_kills(document: Any) -> list[dict[str, Any]]:
+    """Loot statistics: [{"id", "kills", "loot": {"itemID": count}}, ...] (may be absent)."""
+    entries = document.get("kills", []) if isinstance(document, dict) else []
+    if not isinstance(entries, list) or len(entries) > MAX_KILL_ENTRIES:
+        raise SubmissionError("The loot data is invalid.")
+    out = []
+    seen: set[int] = set()
+    for index, entry in enumerate(entries, 1):
+        where = f"Loot entry #{index}"
+        if not isinstance(entry, dict):
+            raise SubmissionError(f"{where} is not an object.")
+        npc_id, kills, loot = entry.get("id"), entry.get("kills"), entry.get("loot")
+        if not _positive_int(npc_id, MAX_NPC_ID - 1):
+            raise SubmissionError(f"{where} has an invalid id.")
+        if npc_id in seen:
+            raise SubmissionError(f"{where} ({npc_id}) appears more than once.")
+        seen.add(npc_id)
+        if not _positive_int(kills, MAX_KILLS_PER_RARE):
+            raise SubmissionError(f"{where} ({npc_id}) has an invalid number of kills.")
+        if not isinstance(loot, dict) or len(loot) > MAX_LOOT_ITEMS:
+            raise SubmissionError(f"{where} ({npc_id}) has invalid loot.")
+        clean: dict[str, int] = {}
+        for item, count in loot.items():
+            if not item.isdigit() or not 0 < int(item) < MAX_ITEM_ID:
+                raise SubmissionError(f"{where} ({npc_id}) has an invalid item id.")
+            if not _positive_int(count, kills * MAX_DROPS_PER_KILL):
+                raise SubmissionError(f"{where} ({npc_id}) has an invalid count for item {item}.")
+            clean[str(int(item))] = count
+        out.append({"id": npc_id, "kills": kills, "loot": clean})
+    return out
+
+
+def validate_submission(document: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """(rares, kills) of a submission; at least one of them must have content."""
+    rares = validate(document, allow_empty=True)
+    kills = validate_kills(document)
+    if not rares and not kills:
+        raise SubmissionError("The submission contains no rares and no loot data.")
+    return rares, kills
+
+
+@dataclass
+class LootReport:
+    kills: int = 0
+    rares: int = 0
+    already_counted: int = 0
+
+    def markdown(self) -> str:
+        if not self.rares and not self.already_counted:
+            return ""
+        line = f"**Loot data:** {self.kills} kills of {self.rares} rares"
+        if self.already_counted:
+            line += f" ({self.already_counted} already counted from this issue)"
+        return line + "\n"
+
+
+def merge_loot(stats: dict[str, Any], incoming: list[dict[str, Any]], issue: int) -> LootReport:
+    """Add kills and drops to the shared totals (in place). Each issue is counted once per
+    rare, so re-running the workflow for the same issue changes nothing."""
+    report = LootReport()
+    for entry in incoming:
+        current = stats.setdefault(str(entry["id"]), {"kills": 0, "loot": {}, "reports": []})
+        if issue in current["reports"]:
+            report.already_counted += 1
+            continue
+        current["kills"] += entry["kills"]
+        for item, count in entry["loot"].items():
+            current["loot"][item] = current["loot"].get(item, 0) + count
+        current["reports"].append(issue)
+        report.kills += entry["kills"]
+        report.rares += 1
+    return report
+
+
+def dump_loot(stats: dict[str, Any]) -> str:
+    """One rare per line, sorted by id, for readable pull request diffs."""
+    lines = [
+        f"  {json.dumps(key)}:{json.dumps(stats[key], separators=(',', ':'), sort_keys=True)}"
+        for key in sorted(stats, key=int)
+    ]
+    return "{\n" + ",\n".join(lines) + "\n}\n"
+
+
 def _near(a: list[Any], b: list[Any]) -> bool:
     return a[0] == b[0] and math.hypot(a[1] - b[1], a[2] - b[2]) < MERGE_DISTANCE
 
@@ -232,6 +326,7 @@ def main() -> int:
     parser.add_argument("--issue", type=int, required=True)
     parser.add_argument("--body", type=Path, required=True, help="file with the issue body")
     parser.add_argument("--data", type=Path, default=ROOT / "data" / "forever_rares.json")
+    parser.add_argument("--loot", type=Path, default=ROOT / "data" / "forever_loot.json")
     parser.add_argument("--report", type=Path, help="write the Markdown report here")
     args = parser.parse_args()
 
@@ -242,7 +337,7 @@ def main() -> int:
             sys.stdout.write(text)
 
     try:
-        incoming = validate(extract_json(args.body.read_text(encoding="utf-8")))
+        rares, kills = validate_submission(extract_json(args.body.read_text(encoding="utf-8")))
     except SubmissionError as exc:
         emit(
             f"### Could not process this submission\n\n{exc}\n\n"
@@ -251,9 +346,12 @@ def main() -> int:
         )
         return 1
     existing = recorded_list(json.loads(args.data.read_text(encoding="utf-8")))
-    report = merge(existing, incoming, args.issue)
+    report = merge(existing, rares, args.issue)
     args.data.write_text(dump(existing), encoding="utf-8", newline="\n")
-    emit(report.markdown(args.issue))
+    stats = json.loads(args.loot.read_text(encoding="utf-8")) if args.loot.is_file() else {}
+    loot_report = merge_loot(stats, kills, args.issue)
+    args.loot.write_text(dump_loot(stats), encoding="utf-8", newline="\n")
+    emit(report.markdown(args.issue) + loot_report.markdown())
     return 0
 
 

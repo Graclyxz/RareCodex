@@ -54,6 +54,7 @@ class LootItem:
     item: int
     chance: float
     quest: bool = False
+    observed: bool = False  # chance measured by players in WoW Forever, not estimated
 
 
 @dataclass
@@ -279,14 +280,18 @@ def lua_chance(value: float) -> str:
     return f"{value:.3g}"
 
 
+def lua_item(i: LootItem) -> str:
+    """{itemID, chance[, isQuestItem[, isObserved]]}"""
+    fields = [str(i.item), lua_chance(i.chance)]
+    if i.quest or i.observed:
+        fields.append("true" if i.quest else "false")
+    if i.observed:
+        fields.append("true")
+    return "{" + ",".join(fields) + "}"
+
+
 def lua_items(items: list[LootItem]) -> str:
-    return (
-        "{"
-        + ",".join(
-            f"{{{i.item},{lua_chance(i.chance)}{',true' if i.quest else ''}}}" for i in items
-        )
-        + "}"
-    )
+    return "{" + ",".join(lua_item(i) for i in items) + "}"
 
 
 def to_lua(entry: int, rare: dict[str, object]) -> str:
@@ -317,6 +322,8 @@ def to_lua(entry: int, rare: dict[str, object]) -> str:
         parts.append(f"flee={rare['flee']}")
     if rare.get("unknown"):
         parts.append("unknown=true")
+    if rare.get("forever"):
+        parts.append(f"forever={rare['forever']}")
     spawn_parts = []
     for s in spawns:
         fields = [str(s["map"]), lua_num(s["x"]), lua_num(s["y"])]
@@ -347,7 +354,8 @@ HEADER = """\
 -- Sources: CMaNGOS Classic DB (GPL-3.0) and data/forever_rares.json (rares recorded in
 -- game, marked unknown=true). Chances are estimates.
 -- spawns: {instanceMapID, worldX, worldY, wander=yards, path={x1,y1,x2,y2,...}}
--- loot / items: {itemID, chancePercent, isQuestItem}
+-- loot / items: {itemID, chancePercent, isQuestItem, measuredInForever}
+-- forever: kills behind the measured chances (data/forever_loot.json)
 -- world: summarized world-drop pools {q=quality, c=chance, n=itemCount, items=...}
 local _, ns = ...
 local D = {}
@@ -511,6 +519,55 @@ def merge_recorded(
     return promoted, skipped
 
 
+MIN_NEW_ITEM_DROPS = 2  # an item the database lacks must be seen this often to be listed
+
+
+def load_loot(path: Path) -> dict[int, tuple[int, dict[int, int]]]:
+    """data/forever_loot.json -> {npcID: (kills, {itemID: times dropped})}."""
+    if not path.is_file():
+        return {}
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    return {
+        int(npc): (int(s["kills"]), {int(item): int(c) for item, c in s["loot"].items()})
+        for npc, s in raw.items()
+    }
+
+
+def apply_forever_loot(
+    rares: dict[int, dict[str, object]],
+    stats: dict[int, tuple[int, dict[int, int]]],
+    min_kills: int,
+) -> list[int]:
+    """Replace estimated chances with the ones players measured in WoW Forever.
+
+    Rares without a database loot table use the measurements from the first kill. Rares
+    with one need min_kills first: with few kills a measured chance is mostly noise. Items
+    the database lacks are added once seen MIN_NEW_ITEM_DROPS times, which keeps one-off
+    random world drops out. Database items nobody saw keep their estimate.
+    """
+    applied = []
+    for npc_id, rare in rares.items():
+        if npc_id not in stats:
+            continue
+        kills, counts = stats[npc_id]
+        loot = rare["loot"]
+        assert isinstance(loot, list)
+        no_table = not loot
+        if kills <= 0 or (not no_table and kills < min_kills):
+            continue
+        by_item = {i.item: i for i in loot}
+        for item, count in counts.items():
+            chance = 100.0 * count / kills
+            if item in by_item:
+                by_item[item].chance, by_item[item].observed = chance, True
+            elif no_table or count >= MIN_NEW_ITEM_DROPS:
+                loot.append(LootItem(item, chance, observed=True))
+        loot.sort(key=lambda i: -i.chance)
+        rare["forever"] = kills
+        applied.append(npc_id)
+    return applied
+
+
 def write_lua(rares: dict[int, dict[str, object]], path: Path) -> None:
     lines = [HEADER] + [to_lua(e, r) for e, r in rares.items()]
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -531,6 +588,18 @@ def main() -> None:
         help="rares recorded in game and shared by players",
     )
     parser.add_argument(
+        "--loot",
+        type=Path,
+        default=root / "data" / "forever_loot.json",
+        help="kill and loot counts shared by players",
+    )
+    parser.add_argument(
+        "--min-kills",
+        type=int,
+        default=20,
+        help="kills a known rare needs before its measured chances replace the estimates",
+    )
+    parser.add_argument(
         "--min-reports",
         type=int,
         default=1,
@@ -547,6 +616,9 @@ def main() -> None:
         print(f"Skipped recorded rares already in the database or without spawns: {skipped}")
     added = len(recorded) - len(promoted) - len(skipped)
     print(f"Added {added} rares known only from players")
+    measured = apply_forever_loot(rares, load_loot(args.loot), args.min_kills)
+    if measured:
+        print(f"Drop chances measured in WoW Forever for: {measured}")
     write_lua(rares, args.output)
     paths = sum(1 for r in rares.values() for s in r["spawns"] if s["path"])  # type: ignore[attr-defined]
     print(f"Wrote {len(rares)} rares ({paths} patrol paths) to {args.output}")
