@@ -255,3 +255,44 @@ def test_rare_without_loot_table_uses_measurements_from_the_first_kill() -> None
     assert apply_forever_loot(rares, {2: (2, {50: 1})}, min_kills=20) == [2]
     assert rares[2]["loot"] == [LootItem(50, 50.0, observed=True)]
     assert rares[2]["forever"] == 2
+
+
+# --- abilities added by a maintainer -------------------------------------------------
+def test_recorded_rares_carry_maintainer_spells_and_promotion_merges_them(tmp_path) -> None:  # noqa: ANN001
+    path = tmp_path / "forever_rares.json"
+    path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": 3736,
+                    "name": "M",
+                    "level": 23,
+                    "elite": False,
+                    "spawns": [[1, 0, 0]],
+                    "spells": [133, 9532],
+                },
+                {
+                    "id": 900001,
+                    "name": "N",
+                    "level": None,
+                    "elite": False,
+                    "spawns": [[1, 1, 2]],
+                    "spells": [8435],
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    def promote(npc_id: int, elite: bool) -> dict | None:
+        spawn = {"map": 1, "x": 0.0, "y": 0.0, "wander": 0.0, "path": []}
+        return (
+            {"name": "M", "elite": elite, "spells": [9532], "spawns": [spawn]}
+            if npc_id == 3736
+            else None
+        )
+
+    rares: dict[int, dict[str, object]] = {}
+    merge_recorded(rares, load_recorded(path), promote)
+    assert rares[3736]["spells"] == [9532, 133]  # database first, no duplicates
+    assert rares[900001]["spells"] == [8435]

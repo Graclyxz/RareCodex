@@ -61,11 +61,14 @@ It currently contains **331 open-world rares** and **99 exact patrol routes**.
 - Only facts are exported (IDs, coordinates, chances). Names, icons and tooltips are read
   from the game client at runtime.
 
-## Known limitations (alpha)
+## Known limitations (beta)
 
-- Rares added by WoW Forever are not in the CMaNGOS database. The addon records them when
-  seen (see below), but they have no ability, route or loot-table data.
-- Kills are counted when you loot the corpse.
+- Rares that only exist in WoW Forever are not in CMaNGOS. Players record their position,
+  patrol route, level and loot (see below); their abilities must be added by hand.
+- **Abilities cannot be recorded automatically.** WoW Forever (Midnight addon rules) hides
+  which spell an NPC casts: in unit cast events and `UnitCastingInfo` the spell ID and name
+  are secret values, in and out of combat, and registering `COMBAT_LOG_EVENT_UNFILTERED`
+  raises `ADDON_ACTION_FORBIDDEN` (verified in game on client 1.60.1).
 
 ## Development
 
@@ -103,6 +106,19 @@ or are targeted (level and rank). Addons cannot access the internet, so sharing 
 3. A maintainer reviews and merges the pull request, then regenerates the database (next
    section). `--min-reports 2` only includes rares confirmed by two separate submissions.
    Rares already in CMaNGOS are skipped.
+
+### Adding abilities by hand
+
+Players can describe a new rare's abilities in the *Notes* field of their submission. A
+maintainer looks up the spell IDs and adds them to the rare in `data/forever_rares.json`:
+
+```json
+{"id": 900001, "name": "...", "spells": [133, 9532], ...}
+```
+
+Submissions can never set `"spells"` themselves (the bot drops the field and keeps the
+reviewed ones). For rares that also exist in CMaNGOS, these spells are added to the
+database ones.
 
 ### Translations
 

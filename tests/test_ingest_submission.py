@@ -222,3 +222,11 @@ def test_loot_accumulates_across_issues_and_counts_each_issue_once() -> None:
     assert again.kills == 0 and again.already_counted == 1
     assert stats["3736"] == {"kills": 5, "loot": {"2592": 2, "4606": 2}, "reports": [1, 2]}
     assert json.loads(dump_loot(stats)) == stats
+
+
+def test_players_cannot_submit_spells_but_reviewed_ones_are_kept() -> None:
+    incoming = validate(submission({**RARE, "spells": [12345]}))
+    assert "spells" not in incoming[0]  # only a maintainer adds abilities
+    data = [{**RARE, "spells": [133], "tracks": [], "reports": [1]}]
+    merge(data, validate(submission({**RARE, "spells": [666]})), issue=2)
+    assert data[0]["spells"] == [133]

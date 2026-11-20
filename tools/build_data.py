@@ -460,7 +460,9 @@ def load_recorded(path: Path, min_reports: int = 1) -> dict[int, dict[str, objec
     """Rares recorded in game (data/forever_rares.json, or an in-game export).
 
     Each object: {"id", "name", "level" (int or null), "elite", "spawns": [[map, x, y], ...],
-    "tracks": [[map, x1, y1, x2, y2, ...], ...], "reports": [issue numbers]}. Rares confirmed
+    "tracks": [[map, x1, y1, x2, y2, ...], ...], "reports": [issue numbers], "spells": [spell
+    IDs]}. "spells" is only ever added by a maintainer (players' notes, reviewed): addons
+    cannot read which spells an NPC casts in WoW Forever, see README. Rares confirmed
     by fewer than min_reports submissions are left out; objects without "reports" (added by
     hand) count as one report. The raw tracks are kept under "tracks" for promotion.
     """
@@ -477,7 +479,7 @@ def load_recorded(path: Path, min_reports: int = 1) -> dict[int, dict[str, objec
             "level": (int(level), int(level)) if level else None,
             "elite": bool(rec.get("elite")),
             "unknown": True,
-            "spells": [],
+            "spells": [int(spell) for spell in rec.get("spells") or []],
             "loot": [],
             "spawns": recorded_spawns(rec["spawns"], tracks),
             "tracks": tracks,
@@ -510,6 +512,10 @@ def merge_recorded(
         full = promote(npc_id, bool(rare["elite"])) if promote else None
         if full is not None:
             attach_routes(full, tracks)
+            # Abilities added by hand complete the database ones.
+            known = full.setdefault("spells", [])
+            assert isinstance(known, list)
+            known.extend(s for s in rare["spells"] if s not in known)  # type: ignore[union-attr]
             rares[npc_id] = full
             promoted.append(npc_id)
         elif rare["spawns"]:
