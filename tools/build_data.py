@@ -31,9 +31,8 @@ AI_ACTION_FLEE = 25
 AI_ACTION_SLOTS = (1, 2, 3)
 
 MOVEMENT_WAYPOINT = 2
-# References with more items than this are summarized, not listed item by item.
-MAX_LISTED_REFERENCE_ITEMS = 40
-MIN_LISTED_QUALITY = 3  # rare (blue) and above
+GEAR = {2, 4}  # item classes listed from world-drop pools: weapons and armor
+CREATURE_TYPE_NONE = {0, 10}  # "not specified"
 
 TABLES = {
     "creature_template",
@@ -62,7 +61,7 @@ class WorldDrop:
     quality: int
     chance: float
     count: int
-    items: list[LootItem] = field(default_factory=list)
+    pools: list[tuple[int, float]] = field(default_factory=list)  # (reference id, chance)
 
 
 def resolve_chances(rows: list[Row]) -> list[tuple[Row, float]]:
@@ -93,7 +92,6 @@ def merge_world_drops(drops: list[WorldDrop]) -> list[WorldDrop]:
     """Merge pools of the same quality into one line, best quality first.
 
     Pools roll independently, so the merged chance is 1 - product(1 - p), not a sum.
-    Items are only listed when every merged pool listed them.
     """
     by_quality: dict[int, list[WorldDrop]] = defaultdict(list)
     for drop in drops:
@@ -102,15 +100,8 @@ def merge_world_drops(drops: list[WorldDrop]) -> list[WorldDrop]:
     for quality in sorted(by_quality, reverse=True):
         pools = by_quality[quality]
         miss = math.prod(1 - p.chance / 100 for p in pools)
-        items = [i for p in pools for i in p.items] if all(p.items for p in pools) else []
-        merged.append(
-            WorldDrop(
-                quality,
-                (1 - miss) * 100,
-                sum(p.count for p in pools),
-                sorted(items, key=lambda i: -i.chance),
-            )
-        )
+        refs = [ref for p in pools for ref in p.pools]
+        merged.append(WorldDrop(quality, (1 - miss) * 100, sum(p.count for p in pools), refs))
     return merged
 
 
@@ -124,6 +115,9 @@ class Builder:
         for row in db.rows("reference_loot_template"):
             self.refs[int(row["entry"])].append(row)
         self.quality = {int(r["entry"]): int(r["Quality"]) for r in db.rows("item_template")}
+        self.item_class = {int(r["entry"]): int(r["class"]) for r in db.rows("item_template")}
+        # World-drop pools referenced by the rares built so far: ref -> (item count, gear).
+        self.used_pools: dict[int, tuple[int, list[int]]] = {}
         self.ai: dict[int, list[Row]] = defaultdict(list)
         for row in db.rows("creature_ai_scripts"):
             self.ai[int(row["creature_id"])].append(row)
@@ -194,13 +188,11 @@ class Builder:
         ]
         qualities = [self.quality.get(int(r["item"]), 0) for r, _ in resolved]
         quality = max(set(qualities), key=qualities.count) if qualities else 0
-        drop = WorldDrop(quality, chance, len(resolved))
-        if quality >= MIN_LISTED_QUALITY and len(resolved) <= MAX_LISTED_REFERENCE_ITEMS:
-            drop.items = sorted(
-                (LootItem(int(r["item"]), chance * c / 100.0) for r, c in resolved),
-                key=lambda i: -i.chance,
-            )
-        return drop
+        self.used_pools[ref] = (
+            len(resolved),
+            [int(r["item"]) for r, _ in resolved if self.item_class.get(int(r["item"])) in GEAR],
+        )
+        return WorldDrop(quality, chance, len(resolved), [(ref, chance)])
 
     # --- movement --------------------------------------------------------
     def path_for(self, spawn: Row) -> list[tuple[float, float]]:
@@ -235,6 +227,7 @@ class Builder:
             "level": (int(tpl["MinLevel"]), int(tpl["MaxLevel"])),
             "elite": elite,
             "display": int(tpl["ModelId1"]),
+            "ctype": int(tpl["CreatureType"] or 0),
             "respawn": (int(rows[0]["spawntimesecsmin"]), int(rows[0]["spawntimesecsmax"])),
             "gold": (int(tpl["MinLootGold"]), int(tpl["MaxLootGold"])),
             "flee": self.flee_percent(entry),
@@ -312,6 +305,8 @@ def to_lua(entry: int, rare: dict[str, object]) -> str:
         parts.append(f"level={{{level[0]},{level[1]}}}")
     if rare.get("display"):
         parts.append(f"display={rare['display']}")
+    if rare.get("ctype") not in (None, *CREATURE_TYPE_NONE):
+        parts.append(f"ctype={rare['ctype']}")
     if isinstance(respawn, tuple):
         parts.append(f"respawn={{{respawn[0]},{respawn[1]}}}")
     if rare.get("elite"):
@@ -339,9 +334,9 @@ def to_lua(entry: int, rare: dict[str, object]) -> str:
         parts.append(
             "world={"
             + ",".join(
-                f"{{q={w.quality},c={lua_chance(w.chance)},n={w.count}"
-                + (f",items={lua_items(w.items)}" if w.items else "")
-                + "}"
+                f"{{q={w.quality},c={lua_chance(w.chance)},n={w.count},pools={{"
+                + ",".join(f"{ref},{lua_chance(c)}" for ref, c in w.pools)
+                + "}}"
                 for w in world
             )
             + "}"
@@ -356,10 +351,15 @@ HEADER = """\
 -- spawns: {instanceMapID, worldX, worldY, wander=yards, path={x1,y1,x2,y2,...}}
 -- loot / items: {itemID, chancePercent, isQuestItem, measuredInForever}
 -- forever: kills behind the measured chances (data/forever_loot.json)
--- world: summarized world-drop pools {q=quality, c=chance, n=itemCount, items=...}
+-- ctype: creature type (1 beast, 2 dragonkin, 3 demon, 4 elemental, 5 giant, 6 undead,
+--        7 humanoid, 8 critter, 9 mechanical)
+-- world: summarized world-drop pools {q=quality, c=chance, n=itemCount,
+--        pools={refID1, chance1, refID2, chance2, ...}}
+-- P[refID] = {itemCount, gearItemID1, gearItemID2, ...}: weapons and armor of a world-drop
+--        pool; every item of the pool is equally likely (chance / itemCount)
 local _, ns = ...
-local D = {}
-ns.Rares = D
+local D, P = {}, {}
+ns.Rares, ns.Pools = D, P
 """
 
 
@@ -574,8 +574,20 @@ def apply_forever_loot(
     return applied
 
 
-def write_lua(rares: dict[int, dict[str, object]], path: Path) -> None:
-    lines = [HEADER] + [to_lua(e, r) for e, r in rares.items()]
+def pools_lua(pools: dict[int, tuple[int, list[int]]]) -> list[str]:
+    return [
+        f"P[{ref}]={{{count}{''.join(f',{i}' for i in gear)}}}"
+        for ref, (count, gear) in sorted(pools.items())
+        if gear
+    ]
+
+
+def write_lua(
+    rares: dict[int, dict[str, object]],
+    path: Path,
+    pools: dict[int, tuple[int, list[int]]] | None = None,
+) -> None:
+    lines = [HEADER] + [to_lua(e, r) for e, r in rares.items()] + pools_lua(pools or {})
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
 
@@ -625,7 +637,7 @@ def main() -> None:
     measured = apply_forever_loot(rares, load_loot(args.loot), args.min_kills)
     if measured:
         print(f"Drop chances measured in WoW Forever for: {measured}")
-    write_lua(rares, args.output)
+    write_lua(rares, args.output, builder.used_pools)
     paths = sum(1 for r in rares.values() for s in r["spawns"] if s["path"])  # type: ignore[attr-defined]
     print(f"Wrote {len(rares)} rares ({paths} patrol paths) to {args.output}")
 

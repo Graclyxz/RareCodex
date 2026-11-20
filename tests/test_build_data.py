@@ -34,12 +34,16 @@ def test_group_rows_with_zero_chance_share_the_remainder() -> None:
 
 def test_world_drops_of_same_quality_merge_as_independent_rolls() -> None:
     merged = merge_world_drops(
-        [WorldDrop(1, 50, 6), WorldDrop(4, 0.01, 2, [LootItem(867, 0.005)]), WorldDrop(1, 50, 2)]
+        [
+            WorldDrop(1, 50, 6, [(100, 50)]),
+            WorldDrop(4, 0.01, 2, [(200, 0.01)]),
+            WorldDrop(1, 50, 2, [(300, 50)]),
+        ]
     )
     assert [d.quality for d in merged] == [4, 1]
     assert merged[1].chance == pytest.approx(75)  # 1 - 0.5 * 0.5
     assert merged[1].count == 8
-    assert merged[0].items == [LootItem(867, 0.005)]
+    assert merged[1].pools == [(100, 50), (300, 50)]  # both pools stay referenced
 
 
 def test_lua_chance_keeps_tiny_values_visible() -> None:
@@ -67,7 +71,8 @@ def test_generated_lua_loads_with_expected_shape() -> None:
             },
         ],
         "loot": [LootItem(9247, 40, quest=True), LootItem(7973, 30.49)],
-        "world": [WorldDrop(4, 0.01, 2, [LootItem(867, 0.005)]), WorldDrop(2, 90, 282)],
+        "world": [WorldDrop(4, 0.01, 2, [(60306, 0.01)]), WorldDrop(2, 90, 282, [(60170, 90)])],
+        "ctype": 7,
     }
     lua = LuaRuntime(unpack_returned_tuples=True)
     data = lua.execute("local D = {}\n" + to_lua(5343, rare) + "\nreturn D")[5343]
@@ -78,8 +83,20 @@ def test_generated_lua_loads_with_expected_shape() -> None:
     spawn = data["spawns"][1]
     assert (spawn[1], spawn[2], spawn[3]) == (1, pytest.approx(-5498.69), pytest.approx(3481.84))
     assert len(spawn["path"]) == 4
-    assert data["world"][1]["items"][1][1] == 867
-    assert data["world"][2]["items"] is None
+    assert list(data["world"][1]["pools"].values()) == [60306, 0.01]
+    assert data["ctype"] == 7
+
+
+def test_creature_type_not_specified_is_omitted() -> None:
+    rare = {"name": "X", "spells": [], "loot": [], "spawns": [], "ctype": 10}
+    assert "ctype" not in to_lua(1, rare)
+
+
+def test_pools_lua_lists_gear_once_and_skips_pools_without_gear() -> None:
+    from build_data import pools_lua
+
+    lines = pools_lua({60170: (282, [1, 2, 3]), 60007: (39, [])})
+    assert lines == ["P[60170]={282,1,2,3}"]
 
 
 RECORDED_JSON = """[

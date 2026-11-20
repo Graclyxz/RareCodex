@@ -23,7 +23,7 @@ function Tooltip.ShowRare(owner, npcID)
     local state = ns.PeekState(npcID)
     GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
     GameTooltip:AddLine(ns.GetName(npcID), RARE_COLOR[1], RARE_COLOR[2], RARE_COLOR[3])
-    GameTooltip:AddLine(L["Level %s %s"]:format(ns.FormatLevel(rare), ns.FormatRank(rare)), 1, 1, 1)
+    GameTooltip:AddLine(ns.FormatLevelLine(rare), 1, 1, 1)
     AddMutedPair(L["Respawn"], ns.FormatRespawn(rare))
     if #rare.spawns > 1 then
         GameTooltip:AddLine(L["Spawns at one of %d points (dots on the map)"]:format(#rare.spawns),

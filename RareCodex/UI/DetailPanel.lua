@@ -18,12 +18,22 @@ local CELL_W, CELL_H = 42, 50
 local LOOT_COLUMNS = 8
 local LOOT_MAX = 24
 local SPELL_MAX = 9
-local WORLD_LIST_MAX = 20
 local WOWHEAD_URL = "https://www.wowhead.com/classic/npc=%d"
+local TAB_W, TAB_H = 120, 22
+local GEAR_COLUMNS = 8
+local GEAR_CELL = 42
+local CONTENT_BOTTOM = -(HEIGHT - PAD - 22 - 12)  -- just above the bottom buttons
+local ITEM_CLASS_WEAPON, ITEM_CLASS_ARMOR = 2, 4
+local GEAR_FILTERS = {
+    { key = "all", label = L["All"] },
+    { key = ITEM_CLASS_WEAPON, label = L["Weapons"] },
+    { key = ITEM_CLASS_ARMOR, label = L["Armor"] },
+}
 
 local panel
 local currentID
-local spellButtons, lootButtons, worldButtons = {}, {}, {}
+local activeTab, gearFilter = "loot", "all"
+local spellButtons, lootButtons, worldButtons, gearButtons = {}, {}, {}, {}
 
 -- Widgets ------------------------------------------------------------------------
 local function Header(parent, text)
@@ -132,19 +142,72 @@ local function ShowWorldTooltip(self)
     local drop = self.drop
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
     GameTooltip:AddLine(self.label:GetText())
-    if drop.items then
-        for i, loot in ipairs(drop.items) do
-            if i > WORLD_LIST_MAX then
-                GameTooltip:AddLine(L["... and %d more"]:format(#drop.items - WORLD_LIST_MAX), 0.7, 0.7, 0.7)
-                break
-            end
-            local name, link = C_Item.GetItemInfo(loot[1])
-            GameTooltip:AddDoubleLine(link or name or ("item:" .. loot[1]), ns.FormatChance(loot[2]))
-        end
-    else
-        GameTooltip:AddLine(L["Random pick from %d items of this quality."]:format(drop.n), 0.7, 0.7, 0.7, true)
-    end
+    GameTooltip:AddLine(L["Random pick from %d items of this quality."]:format(drop.n), 0.7, 0.7, 0.7, true)
+    GameTooltip:AddLine(L["The weapons and armor are listed in the Gear tab."], 0.5, 1, 0.5, true)
     GameTooltip:Show()
+end
+
+-- Gear ---------------------------------------------------------------------------------
+--- Every weapon and armor piece the rare's world drops can give, with its chance per kill.
+--- A pool gives each of its items with the same chance (pool chance / item count); an item
+--- found in several pools adds them up.
+local function GearList(rare)
+    local byItem, list = {}, {}
+    for _, drop in ipairs(rare.world or {}) do
+        local pools = drop.pools or {}
+        for i = 1, #pools, 2 do
+            local pool = ns.Pools[pools[i]]
+            if pool then
+                local each = pools[i + 1] / pool[1]
+                for j = 2, #pool do
+                    local itemID = pool[j]
+                    local entry = byItem[itemID]
+                    if not entry then
+                        entry = { itemID = itemID, chance = 0, quality = drop.q }
+                        byItem[itemID] = entry
+                        list[#list + 1] = entry
+                    end
+                    entry.chance = entry.chance + each
+                end
+            end
+        end
+    end
+    table.sort(list, function(a, b)
+        if a.quality ~= b.quality then return a.quality > b.quality end
+        if a.chance ~= b.chance then return a.chance > b.chance end
+        return a.itemID < b.itemID
+    end)
+    return list
+end
+DetailPanel._GearList = GearList  -- exposed for tests/test_lua_panel.py
+
+local function ShowGearTooltip(self)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:SetItemByID(self.itemID)
+    GameTooltip:AddLine(" ")
+    GameTooltip:AddDoubleLine(L["Chance per kill"], ns.FormatChance(self.chance), 0.7, 0.7, 0.7, 1, 1, 1)
+    GameTooltip:Show()
+end
+
+local function GetGearButton(i)
+    local button = gearButtons[i]
+    if not button then
+        button = CreateFrame("Button", nil, panel.GearContent)
+        button:SetSize(ICON, ICON)
+        button.Icon = button:CreateTexture(nil, "ARTWORK")
+        button.Icon:SetAllPoints()
+        button.Border = button:CreateTexture(nil, "OVERLAY")
+        button.Border:SetTexture("Interface\\Common\\WhiteIconFrame")
+        button.Border:SetAllPoints()
+        button:SetScript("OnEnter", ShowGearTooltip)
+        button:SetScript("OnLeave", HideTooltip)
+        button:SetScript("OnClick", function(self)
+            local _, link = C_Item.GetItemInfo(self.itemID)
+            if link then HandleModifiedItemClick(link) end
+        end)
+        gearButtons[i] = button
+    end
+    return button
 end
 
 local function GetWorldButton(i)
@@ -220,6 +283,39 @@ local function CreatePanel()
     panel.LootHeader = Header(panel, "")
     panel.WorldHeader = Header(panel, L["World drops"])
 
+    -- Tabs: the rare's own loot, or the weapons and armor of its world drops.
+    local function Tab(key)
+        local tab = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        tab:SetSize(TAB_W, TAB_H)
+        tab:SetScript("OnClick", function()
+            activeTab = key
+            DetailPanel.Refresh()
+        end)
+        return tab
+    end
+    panel.TabLoot, panel.TabGear = Tab("loot"), Tab("gear")
+    panel.TabLoot:SetText(L["Loot"])
+
+    -- Gear tab: filters and a scrolling grid of item icons.
+    panel.GearFilters = {}
+    for i, filter in ipairs(GEAR_FILTERS) do
+        local button = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        button:SetSize(90, 20)
+        button:SetText(filter.label)
+        button:SetScript("OnClick", function()
+            gearFilter = filter.key
+            DetailPanel.Refresh()
+        end)
+        button.key = filter.key
+        panel.GearFilters[i] = button
+    end
+    panel.GearScroll = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
+    panel.GearContent = CreateFrame("Frame", nil, panel.GearScroll)
+    panel.GearContent:SetSize(GEAR_COLUMNS * GEAR_CELL, 1)
+    panel.GearScroll:SetScrollChild(panel.GearContent)
+    panel.GearEmpty = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    panel.GearEmpty:SetText(L["No weapons or armor of this kind."])
+
     local buttons = {
         { L["Show on map"], function()
             local mapID = PrimarySpawnOnMap(currentID)
@@ -253,7 +349,7 @@ end
 local function RenderInfo(npcID, rare)
     local state = ns.PeekState(npcID)
     local lines = {
-        L["Level %s %s"]:format(ns.FormatLevel(rare), "|cff66ccff" .. ns.FormatRank(rare) .. "|r"),
+        ns.FormatLevelLine(rare, "|cff66ccff"),
         L["Respawn: %s"]:format(ns.FormatRespawn(rare)),
         L["Spawn points: %d"]:format(#rare.spawns),
     }
@@ -377,6 +473,65 @@ local function RenderWorldDrops(rare, top)
     for i = #drops + 1, #worldButtons do worldButtons[i]:Hide() end
 end
 
+-- Tabs row; only shown when there is gear to list. Returns where the tab content starts.
+local function RenderTabs(gearCount, top)
+    local show = gearCount > 0
+    panel.TabLoot:SetShown(show)
+    panel.TabGear:SetShown(show)
+    if not show then return top end
+    panel.TabLoot:SetPoint("TOPLEFT", RIGHT_X, top)
+    panel.TabGear:SetPoint("LEFT", panel.TabLoot, "RIGHT", 6, 0)
+    panel.TabGear:SetText(L["Gear (%d)"]:format(gearCount))
+    -- The selected tab is shown pressed (disabled).
+    panel.TabLoot:SetEnabled(activeTab ~= "loot")
+    panel.TabGear:SetEnabled(activeTab ~= "gear")
+    return top - TAB_H - 10
+end
+
+local function HideLoot()
+    panel.LootHeader:Hide()
+    for _, button in ipairs(lootButtons) do button:Hide() end
+end
+
+local function RenderGear(gear, top, visible)
+    for _, filter in ipairs(panel.GearFilters) do filter:SetShown(visible) end
+    panel.GearScroll:SetShown(visible)
+    panel.GearEmpty:Hide()
+    if not visible then return end
+
+    for i, filter in ipairs(panel.GearFilters) do
+        filter:SetPoint("TOPLEFT", RIGHT_X + (i - 1) * 96, top)
+        filter:SetEnabled(gearFilter ~= filter.key)
+    end
+    local gridTop = top - 28
+    panel.GearScroll:ClearAllPoints()
+    panel.GearScroll:SetPoint("TOPLEFT", RIGHT_X, gridTop)
+    panel.GearScroll:SetPoint("BOTTOMRIGHT", panel, "TOPLEFT", RIGHT_X + GEAR_COLUMNS * GEAR_CELL,
+        CONTENT_BOTTOM)
+
+    local shown = 0
+    for _, entry in ipairs(gear) do
+        local classID = select(6, C_Item.GetItemInfoInstant(entry.itemID))
+        if gearFilter == "all" or classID == gearFilter then
+            shown = shown + 1
+            local button = GetGearButton(shown)
+            local column, row = (shown - 1) % GEAR_COLUMNS, math.floor((shown - 1) / GEAR_COLUMNS)
+            button:SetPoint("TOPLEFT", column * GEAR_CELL, -row * GEAR_CELL)
+            button.itemID, button.chance = entry.itemID, entry.chance
+            button.Icon:SetTexture(C_Item.GetItemIconByID(entry.itemID))
+            button.Border:SetVertexColor(QualityColor(entry.quality))
+            button:Show()
+        end
+    end
+    for i = shown + 1, #gearButtons do gearButtons[i]:Hide() end
+    panel.GearContent:SetHeight(math.max(1, math.ceil(shown / GEAR_COLUMNS) * GEAR_CELL))
+    panel.GearScroll:SetVerticalScroll(0)
+    if shown == 0 then
+        panel.GearEmpty:SetPoint("TOPLEFT", RIGHT_X, gridTop - 6)
+        panel.GearEmpty:Show()
+    end
+end
+
 local function Render(npcID)
     local rare = ns.Rares[npcID]
     panel.Title:SetText(ns.GetName(npcID))
@@ -391,8 +546,18 @@ local function Render(npcID)
     panel.Model:SetCamDistanceScale(1)
     RenderInfo(npcID, rare)
     local top = RenderSpells(rare, CONTENT_TOP)
-    top = RenderLoot(npcID, rare, top)
-    RenderWorldDrops(rare, top)
+    local gear = GearList(rare)
+    if #gear == 0 then activeTab = "loot" end
+    top = RenderTabs(#gear, top)
+    local showLoot = activeTab == "loot"
+    if showLoot then
+        RenderWorldDrops(rare, RenderLoot(npcID, rare, top))
+    else
+        HideLoot()
+        for _, button in ipairs(worldButtons) do button:Hide() end
+        panel.WorldHeader:Hide()
+    end
+    RenderGear(gear, top, not showLoot)
 end
 
 -- Public API ---------------------------------------------------------------------

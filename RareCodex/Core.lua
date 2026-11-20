@@ -135,6 +135,22 @@ function ns.FormatRank(rare)
     return rare.elite and L["Rare Elite"] or L["Rare"]
 end
 
+-- CMaNGOS creature type IDs (rare.ctype), see the header of Data/Rares.lua.
+local CREATURE_TYPES = {
+    [1] = L["Beast"], [2] = L["Dragonkin"], [3] = L["Demon"], [4] = L["Elemental"],
+    [5] = L["Giant"], [6] = L["Undead"], [7] = L["Humanoid"], [8] = L["Critter"],
+    [9] = L["Mechanical"],
+}
+
+--- "Level 9 Rare · Beast" (type omitted when unknown).
+function ns.FormatLevelLine(rare, rankColor)
+    local rank = ns.FormatRank(rare)
+    if rankColor then rank = rankColor .. rank .. "|r" end
+    local line = L["Level %s %s"]:format(ns.FormatLevel(rare), rank)
+    local creatureType = CREATURE_TYPES[rare.ctype]
+    return creatureType and (line .. " · " .. creatureType) or line
+end
+
 function ns.FormatAgo(stamp)
     local delta = time() - stamp
     if delta < 60 then return L["just now"] end
