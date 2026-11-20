@@ -4,7 +4,7 @@
 ## Notes-esES: Atlas de raros: modelos 3D, habilidades, rutas de patrulla y botín con probabilidades.
 ## Notes-esMX: Atlas de raros: modelos 3D, habilidades, rutas de patrulla y botín con probabilidades.
 ## Author: Graclyxz
-## Version: 0.2.0
+## Version: 0.2.1
 ## SavedVariables: RareCodexDB
 ## X-License: GPL-3.0
 ## IconTexture: Interface\Icons\INV_Misc_Book_09

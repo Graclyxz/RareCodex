@@ -13,6 +13,13 @@ function RareCodexPinMixin:OnLoad()
     self:SetScalingLimits(1, 1.0, 1.25)
 end
 
+-- The map canvas calls SetPassThroughButtons on every pin it acquires
+-- (MapCanvasPinMixin:CheckMouseButtonPassthrough). That frame method is protected in combat,
+-- so opening the map while fighting raised ADDON_ACTION_BLOCKED for our pins. They handle
+-- every mouse button themselves (see HandleClick), so pass-through is not needed: this
+-- override shadows the protected method and does nothing.
+function RareCodexPinMixin:SetPassThroughButtons() end
+
 function RareCodexPinMixin:OnAcquired(group)
     self.group = group
     self:SetPosition(group.primary.x, group.primary.y)
