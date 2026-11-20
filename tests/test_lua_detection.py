@@ -48,14 +48,28 @@ PlaySound = function() end
 SOUNDKIT = { RAID_WARNING = 1 }
 RaidNotice_AddMessage = function() end
 ChatTypeInfo = { RAID_WARNING = {} }
+
+-- Units: units[token] = { guid, dead, denied }
+units = {}
+function UnitGUID(unit) return units[unit] and units[unit].guid end
+function UnitIsDead(unit) return units[unit] and units[unit].dead or false end
+function UnitIsTapDenied(unit) return units[unit] and units[unit].denied or false end
+function UnitClassification() return "normal" end
+
+-- Loot window: loot = { { item = id or nil, guid = source } }
+loot = {}
+function GetNumLootItems() return #loot end
+function GetLootSlotLink(slot) return loot[slot].item and tostring(loot[slot].item) end
+function GetLootSourceInfo(slot) return loot[slot].guid, 1 end
+C_Item = { GetItemInfoInstant = function(link) return tonumber(link) end }
 """
 
 NS = """
 local handlers = {}
 ns = {
     L = setmetatable({}, { __index = function(_, k) return k end }),
-    db = { alerts = false, unknown = {}, npcs = {} },
-    Rares = {},
+    db = { alerts = false, unknown = {}, npcs = {}, killed = {}, looted = {} },
+    Rares = { [3736] = { name = "Mordenthal" } },
     Contribute = { OnNewRare = function() end },
     DetailPanel = {},
     IsSecret = function() return false end,
@@ -64,7 +78,9 @@ ns = {
         handlers[event] = handlers[event] or {}
         table.insert(handlers[event], fn)
     end,
-    NpcIDFromGUID = function(guid) return tonumber((select(6, strsplit("-", guid)))) end,
+    NpcIDFromGUID = function(guid)
+        return guid and tonumber((select(6, strsplit("-", guid))))
+    end,
     GetState = function(id)
         ns.db.npcs[id] = ns.db.npcs[id] or { kills = 0, loot = {} }
         return ns.db.npcs[id]
@@ -130,3 +146,45 @@ def test_lost_vignette_ends_the_encounter(lua: LuaRuntime) -> None:
     for _ in range(5):
         lua.execute("now = now + 2; tick()")
     assert len(lua.eval("ns.db.unknown[900001]").tracks) == 1
+
+
+# --- kills -----------------------------------------------------------------------------
+RARE_GUID = "Creature-0-0-0-0-3736-00000000AA"
+
+
+def kills(lua: LuaRuntime) -> int:
+    state = lua.eval("ns.db.npcs[3736]")
+    return state.kills if state else 0
+
+
+def test_kill_without_loot_is_counted_once(lua: LuaRuntime) -> None:
+    lua.execute(f"units.target = {{ guid = '{RARE_GUID}', dead = false }}")
+    lua.execute("fire('UNIT_HEALTH', 'target')")
+    assert kills(lua) == 0  # still alive
+    lua.execute("units.target.dead = true")
+    for _ in range(3):
+        lua.execute("fire('UNIT_HEALTH', 'target')")
+    lua.execute("fire('PLAYER_TARGET_CHANGED')")
+    assert kills(lua) == 1
+
+
+def test_rare_tapped_by_someone_else_is_not_our_kill(lua: LuaRuntime) -> None:
+    lua.execute(f"units.nameplate3 = {{ guid = '{RARE_GUID}', dead = true, denied = true }}")
+    lua.execute("fire('UNIT_HEALTH', 'nameplate3')")
+    assert kills(lua) == 0
+
+
+def test_looting_after_the_death_adds_drops_but_not_another_kill(lua: LuaRuntime) -> None:
+    lua.execute(f"units.target = {{ guid = '{RARE_GUID}', dead = true }}")
+    lua.execute("fire('UNIT_HEALTH', 'target')")
+    slots = ", ".join(f"{{ item = {item}, guid = '{RARE_GUID}' }}" for item in (2592, 4606))
+    lua.execute(f"loot = {{ {slots} }}")
+    lua.execute("fire('LOOT_READY'); fire('LOOT_READY')")  # the event can fire twice
+    assert kills(lua) == 1
+    assert dict(lua.eval("ns.db.npcs[3736].loot").items()) == {2592: 1, 4606: 1}
+
+
+def test_looting_counts_the_kill_when_the_death_was_not_seen(lua: LuaRuntime) -> None:
+    lua.execute(f"loot = {{ {{ item = 2592, guid = '{RARE_GUID}' }} }}")
+    lua.execute("fire('LOOT_READY')")
+    assert kills(lua) == 1

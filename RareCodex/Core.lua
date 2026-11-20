@@ -8,7 +8,8 @@ ns.Rares = ns.Rares or {}
 local DEFAULTS = {
     version = 1,
     npcs = {},          -- [npcID] = { lastSeen, kills, loot = { [itemID] = count } }
-    looted = {},        -- [creatureGUID] = timestamp, avoids double counting a corpse
+    looted = {},        -- [creatureGUID] = timestamp, avoids double counting a corpse's drops
+    killed = {},        -- [creatureGUID] = timestamp, avoids double counting a kill
     unknown = {},       -- rares seen in game that are not in the database (Forever additions)
     axisSwapped = nil,  -- world coordinate order, set by Coords.Calibrate()
     show = { zone = true, continent = false, world = false },  -- pins per map scope
@@ -57,8 +58,10 @@ ns.On("ADDON_LOADED", function(name)
     RareCodexDB = RareCodexDB or {}
     ApplyDefaults(RareCodexDB, DEFAULTS)
     local now = time()
-    for guid, stamp in pairs(RareCodexDB.looted) do
-        if now - stamp > LOOTED_GUID_TTL then RareCodexDB.looted[guid] = nil end
+    for _, seen in ipairs({ RareCodexDB.looted, RareCodexDB.killed }) do
+        for guid, stamp in pairs(seen) do
+            if now - stamp > LOOTED_GUID_TTL then seen[guid] = nil end
+        end
     end
     ns.db = RareCodexDB
 end)

@@ -202,7 +202,38 @@ local function IsTracked(npcID)
     return ns.Rares[npcID] or ns.db.unknown[npcID]
 end
 
--- A kill is counted the first time a rare's corpse is looted; drops are tallied per item.
+-- Kills and loot ----------------------------------------------------------------------
+-- Drop chances are drops / kills, so kills that drop nothing must count too: a kill is
+-- counted when a rare we may loot dies (seen through target, focus, mouseover or a
+-- nameplate) and, as a fallback, when its corpse is looted. Each creature (GUID) counts once.
+
+local function CountKill(guid, npcID)
+    if ns.db.killed[guid] then return end
+    ns.db.killed[guid] = time()
+    local state = ns.GetState(npcID)
+    state.kills = state.kills + 1
+    state.lastSeen = time()
+    if ns.DetailPanel.Refresh then ns.DetailPanel.Refresh(npcID) end
+end
+
+-- A dead rare is ours when it is not tapped by someone else (grey name), i.e. we or our
+-- group may loot it.
+local function CheckDeath(unit)
+    local guid = UnitGUID(unit)
+    local npcID = ns.NpcIDFromGUID(guid)
+    if not npcID or not IsTracked(npcID) or ns.db.killed[guid] then return end
+    local dead, denied = UnitIsDead(unit), UnitIsTapDenied(unit)
+    if ns.IsSecret(dead) or ns.IsSecret(denied) then return end
+    if dead and not denied then CountKill(guid, npcID) end
+end
+
+local WATCHED_UNITS = { target = true, focus = true, mouseover = true }
+ns.On("UNIT_HEALTH", function(unit)
+    if WATCHED_UNITS[unit] or (unit and unit:find("^nameplate")) then CheckDeath(unit) end
+end)
+ns.On("PLAYER_TARGET_CHANGED", function() CheckDeath("target") end)
+
+-- Drops are tallied once per corpse; looting also counts the kill if the death was missed.
 ns.On("LOOT_READY", function()
     local itemsBySource = {}
     for slot = 1, GetNumLootItems() do
@@ -221,9 +252,8 @@ ns.On("LOOT_READY", function()
     end
     for guid, entry in pairs(itemsBySource) do
         ns.db.looted[guid] = time()
+        CountKill(guid, entry.npcID)
         local state = ns.GetState(entry.npcID)
-        state.kills = state.kills + 1
-        state.lastSeen = time()
         for _, itemID in ipairs(entry.items) do
             state.loot[itemID] = (state.loot[itemID] or 0) + 1
         end
