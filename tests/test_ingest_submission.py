@@ -105,3 +105,30 @@ def test_main_writes_data_and_report(tmp_path: Path) -> None:
     assert json.loads(data.read_text(encoding="utf-8"))[0]["reports"] == [7]
     assert "New rares (1)" in report.read_text(encoding="utf-8")
     assert data.read_text(encoding="utf-8") == dump(json.loads(data.read_text(encoding="utf-8")))
+
+
+TRACK = [1, 10.0, 20.0, 15.0, 20.0, 20.0, 20.0]
+
+
+def test_tracks_are_validated_and_merged_without_duplicates() -> None:
+    data: list[dict] = []
+    merge(data, validate(submission({**RARE, "tracks": [TRACK]})), issue=1)
+    other = [1, 50.0, 50.0, 60.0, 50.0]
+    merge(data, validate(submission({**RARE, "tracks": [TRACK, other]})), issue=2)
+    assert data[0]["tracks"] == [TRACK, other]
+
+
+@pytest.mark.parametrize(
+    ("tracks", "message"),
+    [
+        ("nope", "invalid tracks"),
+        ([[1, 10.0, 20.0]], "malformed track"),  # a single point
+        ([[1, 10.0, 20.0, 30.0]], "malformed track"),  # odd coordinate count
+        ([[1, *([1.0] * 602)]], "too many points"),
+        ([[-1, 1.0, 1.0, 2.0, 2.0]], "invalid map id"),
+        ([[1, 1.0, 1e9, 2.0, 2.0]], "out of range"),
+    ],
+)
+def test_bad_tracks_are_rejected(tracks: object, message: str) -> None:
+    with pytest.raises(SubmissionError, match=message):
+        validate(submission({**RARE, "tracks": tracks}))

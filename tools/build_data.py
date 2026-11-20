@@ -14,6 +14,7 @@ import json
 import math
 import re
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -140,6 +141,13 @@ class Builder:
         for row in db.rows("creature_movement_template"):
             if int(row["PathId"]) == 0:
                 self.paths_by_entry[int(row["Entry"])].append(row)
+        # Every creature, not only rares: WoW Forever turns some classic named NPCs into rares,
+        # and players report them by ID.
+        self.templates = {int(t["Entry"]): t for t in db.rows("creature_template")}
+        self.spawn_rows: dict[int, list[Row]] = defaultdict(list)
+        for row in db.rows("creature"):
+            if row["map"] in OPEN_WORLD_MAPS:
+                self.spawn_rows[int(row["id"])].append(row)
 
     # --- abilities -------------------------------------------------------
     def spells(self, tpl: Row) -> list[int]:
@@ -202,47 +210,46 @@ class Builder:
         return [(float(r["PositionX"]), float(r["PositionY"])) for r in rows]
 
     # --- assembly --------------------------------------------------------
-    def build(self) -> dict[int, dict[str, object]]:
-        rares = {
-            int(t["Entry"]): t for t in self.db.rows("creature_template") if t["Rank"] in RARE_RANKS
+    def entry(self, entry: int, elite: bool) -> dict[str, object] | None:
+        """Full data for any creature with open-world spawns, or None without spawns."""
+        tpl = self.templates.get(entry)
+        rows = self.spawn_rows.get(entry)
+        if tpl is None or not rows:
+            return None
+        items, world = self.loot_for(int(tpl["LootId"] or 0))
+        spawn_list = []
+        for s in rows:
+            path = self.path_for(s) if s["MovementType"] == MOVEMENT_WAYPOINT else []
+            spawn_list.append(
+                {
+                    "map": int(s["map"]),
+                    "x": float(s["position_x"]),
+                    "y": float(s["position_y"]),
+                    "wander": float(s["spawndist"]) if s["MovementType"] == 1 else 0.0,
+                    "path": path,
+                }
+            )
+        return {
+            "name": str(tpl["Name"]),
+            "level": (int(tpl["MinLevel"]), int(tpl["MaxLevel"])),
+            "elite": elite,
+            "display": int(tpl["ModelId1"]),
+            "respawn": (int(rows[0]["spawntimesecsmin"]), int(rows[0]["spawntimesecsmax"])),
+            "gold": (int(tpl["MinLootGold"]), int(tpl["MaxLootGold"])),
+            "flee": self.flee_percent(entry),
+            "spells": self.spells(tpl),
+            "spawns": spawn_list,
+            "loot": items,
+            "world": world,
         }
-        spawns: dict[int, list[Row]] = defaultdict(list)
-        for row in self.db.rows("creature"):
-            if row["id"] in rares and row["map"] in OPEN_WORLD_MAPS:
-                spawns[int(row["id"])].append(row)
 
+    def build(self) -> dict[int, dict[str, object]]:
         out: dict[int, dict[str, object]] = {}
-        for entry in sorted(spawns):
-            tpl = rares[entry]
-            items, world = self.loot_for(int(tpl["LootId"] or 0))
-            spawn_list = []
-            for s in spawns[entry]:
-                path = self.path_for(s) if s["MovementType"] == MOVEMENT_WAYPOINT else []
-                spawn_list.append(
-                    {
-                        "map": int(s["map"]),
-                        "x": float(s["position_x"]),
-                        "y": float(s["position_y"]),
-                        "wander": float(s["spawndist"]) if s["MovementType"] == 1 else 0.0,
-                        "path": path,
-                    }
-                )
-            out[entry] = {
-                "name": str(tpl["Name"]),
-                "level": (int(tpl["MinLevel"]), int(tpl["MaxLevel"])),
-                "elite": tpl["Rank"] == RANK_RARE_ELITE,
-                "display": int(tpl["ModelId1"]),
-                "respawn": (
-                    int(spawns[entry][0]["spawntimesecsmin"]),
-                    int(spawns[entry][0]["spawntimesecsmax"]),
-                ),
-                "gold": (int(tpl["MinLootGold"]), int(tpl["MaxLootGold"])),
-                "flee": self.flee_percent(entry),
-                "spells": self.spells(tpl),
-                "spawns": spawn_list,
-                "loot": items,
-                "world": world,
-            }
+        for entry, tpl in sorted(self.templates.items()):
+            if tpl["Rank"] in RARE_RANKS:
+                rare = self.entry(entry, elite=tpl["Rank"] == RANK_RARE_ELITE)
+                if rare:
+                    out[entry] = rare
         return out
 
 
@@ -358,12 +365,94 @@ def recorded_list(document: Any) -> list[dict[str, Any]]:  # parsed JSON is dyna
     return document
 
 
+Track = tuple[int, list[tuple[float, float]]]  # (map, [(x, y), ...]) in world coordinates
+
+MIN_PATROL_LENGTH = 15.0  # yards; a track shorter than this is a standing rare, not a patrol
+SAME_ROUTE_DISTANCE = 60.0  # yards; tracks this close to each other follow the same route
+ATTACH_DISTANCE = 200.0  # yards; a recorded route this close to a database spawn belongs to it
+SAME_SPAWN_DISTANCE = 25.0  # yards
+
+
+def _distance(a: tuple[float, float], b: tuple[float, float]) -> float:
+    return math.hypot(a[0] - b[0], a[1] - b[1])
+
+
+def _track_length(points: list[tuple[float, float]]) -> float:
+    return sum(_distance(a, b) for a, b in zip(points, points[1:], strict=False))
+
+
+def _tracks_touch(a: Track, b: Track) -> bool:
+    return a[0] == b[0] and any(_distance(p, q) < SAME_ROUTE_DISTANCE for p in a[1] for q in b[1])
+
+
+def patrol_routes(tracks: list[Track]) -> list[Track]:
+    """Tracks recorded by players, grouped by route (tracks that come close to each other);
+    the longest track of each group stands for the route. Tracks too short to be a patrol
+    are dropped (their first point is still a spawn sighting)."""
+    moving = [t for t in tracks if _track_length(t[1]) >= MIN_PATROL_LENGTH]
+    groups: list[list[Track]] = []
+    for track in moving:
+        touching = [g for g in groups if any(_tracks_touch(track, t) for t in g)]
+        merged = [track] + [t for g in touching for t in g]
+        groups = [g for g in groups if g not in touching] + [merged]
+    return [max(g, key=lambda t: _track_length(t[1])) for g in groups]
+
+
+def recorded_spawns(points: list[list[float]], tracks: list[Track]) -> list[dict[str, object]]:
+    """Spawn entries for a rare known only from players: one per patrol route (its start,
+    with the route as path) plus every sighting that is not on a route."""
+    routes = patrol_routes(tracks)
+    spawns: list[dict[str, object]] = [
+        {"map": m, "x": pts[0][0], "y": pts[0][1], "wander": 0.0, "path": pts} for m, pts in routes
+    ]
+    for m, x, y in points:
+        on_route = any(
+            rm == m and any(_distance((x, y), p) < SAME_ROUTE_DISTANCE for p in rpts)
+            for rm, rpts in routes
+        )
+        known = any(
+            s["map"] == m and _distance((x, y), (s["x"], s["y"])) < SAME_SPAWN_DISTANCE  # type: ignore[arg-type]
+            for s in spawns
+        )
+        if not on_route and not known:
+            spawns.append({"map": int(m), "x": float(x), "y": float(y), "wander": 0.0, "path": []})
+    return spawns
+
+
+def attach_routes(rare: dict[str, object], tracks: list[Track]) -> None:
+    """Give database spawns without a path the routes players recorded near them; routes
+    far from every database spawn become new spawns (WoW Forever may have moved the rare)."""
+    spawns = rare["spawns"]
+    assert isinstance(spawns, list)
+    for m, pts in patrol_routes(tracks):
+        nearest = min(
+            (s for s in spawns if s["map"] == m and not s["path"]),
+            key=lambda s: _distance((s["x"], s["y"]), pts[0]),
+            default=None,
+        )
+        if nearest and _distance((nearest["x"], nearest["y"]), pts[0]) < ATTACH_DISTANCE:
+            nearest["path"] = pts
+            nearest["wander"] = 0.0
+        else:
+            spawns.append({"map": m, "x": pts[0][0], "y": pts[0][1], "wander": 0.0, "path": pts})
+
+
+def _parse_tracks(raw: list[list[float]]) -> list[Track]:
+    """[[map, x1, y1, x2, y2, ...], ...] -> [(map, [(x1, y1), ...]), ...]"""
+    tracks: list[Track] = []
+    for t in raw:
+        coords = [float(v) for v in t[1:]]
+        tracks.append((int(t[0]), list(zip(coords[0::2], coords[1::2], strict=True))))
+    return tracks
+
+
 def load_recorded(path: Path, min_reports: int = 1) -> dict[int, dict[str, object]]:
     """Rares recorded in game (data/forever_rares.json, or an in-game export).
 
     Each object: {"id", "name", "level" (int or null), "elite", "spawns": [[map, x, y], ...],
-    "reports": [issue numbers]}. Rares confirmed by fewer than min_reports submissions are
-    left out; objects without "reports" (added by hand) count as one report.
+    "tracks": [[map, x1, y1, x2, y2, ...], ...], "reports": [issue numbers]}. Rares confirmed
+    by fewer than min_reports submissions are left out; objects without "reports" (added by
+    hand) count as one report. The raw tracks are kept under "tracks" for promotion.
     """
     if not path.is_file():
         return {}
@@ -372,6 +461,7 @@ def load_recorded(path: Path, min_reports: int = 1) -> dict[int, dict[str, objec
         if len(rec.get("reports") or [None]) < min_reports:
             continue
         level = rec.get("level")
+        tracks = _parse_tracks(rec.get("tracks") or [])
         out[int(rec["id"])] = {
             "name": str(rec["name"]),
             "level": (int(level), int(level)) if level else None,
@@ -379,26 +469,44 @@ def load_recorded(path: Path, min_reports: int = 1) -> dict[int, dict[str, objec
             "unknown": True,
             "spells": [],
             "loot": [],
-            "spawns": [
-                {"map": int(m), "x": float(x), "y": float(y), "wander": 0.0, "path": []}
-                for m, x, y in rec["spawns"]
-            ],
+            "spawns": recorded_spawns(rec["spawns"], tracks),
+            "tracks": tracks,
         }
     return out
 
 
+Promoter = Callable[[int, bool], "dict[str, object] | None"]
+
+
 def merge_recorded(
-    rares: dict[int, dict[str, object]], recorded: dict[int, dict[str, object]]
-) -> list[int]:
-    """Add recorded rares the database lacks; returns the IDs skipped as already known.
-    Rares without any spawn point cannot be placed on the map and are skipped too."""
-    skipped = []
+    rares: dict[int, dict[str, object]],
+    recorded: dict[int, dict[str, object]],
+    promote: Promoter | None = None,
+) -> tuple[list[int], list[int]]:
+    """Add recorded rares to rares. Returns (promoted, skipped).
+
+    - Already a rare in the database: skipped.
+    - A non-rare creature in the database (WoW Forever made it a rare): promoted, i.e. built
+      from the database by promote(npc_id, elite) with the players' routes attached.
+    - Unknown to the database: added from the recorded data; skipped without spawns.
+    """
+    promoted, skipped = [], []
     for npc_id, rare in sorted(recorded.items()):
-        if npc_id in rares or not rare["spawns"]:
+        tracks = rare.pop("tracks", [])
+        assert isinstance(tracks, list)
+        if npc_id in rares:
             skipped.append(npc_id)
-        else:
+            continue
+        full = promote(npc_id, bool(rare["elite"])) if promote else None
+        if full is not None:
+            attach_routes(full, tracks)
+            rares[npc_id] = full
+            promoted.append(npc_id)
+        elif rare["spawns"]:
             rares[npc_id] = rare
-    return skipped
+        else:
+            skipped.append(npc_id)
+    return promoted, skipped
 
 
 def write_lua(rares: dict[int, dict[str, object]], path: Path) -> None:
@@ -427,12 +535,16 @@ def main() -> None:
         help="independent submissions a recorded rare needs before it is included",
     )
     args = parser.parse_args()
-    rares = Builder(SqlDump(args.dump, TABLES)).build()
+    builder = Builder(SqlDump(args.dump, TABLES))
+    rares = builder.build()
     recorded = load_recorded(args.recorded, args.min_reports)
-    skipped = merge_recorded(rares, recorded)
+    promoted, skipped = merge_recorded(rares, recorded, builder.entry)
+    if promoted:
+        print(f"Promoted to rares with full database data: {promoted}")
     if skipped:
         print(f"Skipped recorded rares already in the database or without spawns: {skipped}")
-    print(f"Added {len(recorded) - len(skipped)} rares recorded in game")
+    added = len(recorded) - len(promoted) - len(skipped)
+    print(f"Added {added} rares known only from players")
     write_lua(rares, args.output)
     paths = sum(1 for r in rares.values() for s in r["spawns"] if s["path"])  # type: ignore[attr-defined]
     print(f"Wrote {len(rares)} rares ({paths} patrol paths) to {args.output}")

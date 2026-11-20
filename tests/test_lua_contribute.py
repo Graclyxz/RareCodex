@@ -99,3 +99,17 @@ def test_export_respects_swapped_axes() -> None:
 def test_chat_link_uses_addon_link_type() -> None:
     _, contribute = load_contribute("{ unknown = {} }")
     assert "|Haddon:RareCodex:contribute|h" in contribute.ChatLink()
+
+
+def test_export_includes_tracks_in_world_coordinates() -> None:
+    db = """{ axisSwapped = false, unknown = {
+        [1] = { name = 'Walker', sightings = { { mapID = 1414, x = 0.5, y = 0.25 } },
+                tracks = {
+                    { mapID = 1414, points = { 0.5, 0.25, 0.51, 0.25, 0.52, 0.26 } },
+                    { mapID = 9999, points = { 0.1, 0.1, 0.2, 0.2 } },  -- unknown map: dropped
+                    { mapID = 1414, points = { 0.3, 0.3 } },  -- single point: dropped
+                } },
+    } }"""
+    rare = json.loads(export(db))["rares"][0]
+    assert rare["tracks"] == [[1, 500.0, 250.0, 510.0, 250.0, 520.0, 260.0]]
+    assert validate({"rares": [rare]})[0]["tracks"] == rare["tracks"]

@@ -1,6 +1,6 @@
 -- Detection: notices rares (vignettes, target, mouseover) and records kills and loot.
 -- Rares missing from the database (e.g. WoW Forever additions) are recorded in
--- RareCodexDB.unknown so they can be exported with /rc export and added to the data.
+-- RareCodexDB.unknown (sightings, patrol tracks, level) so players can share them (/rc share).
 local _, ns = ...
 local L = ns.L
 
@@ -9,6 +9,16 @@ local ALERT_COOLDOWN = 5 * 60
 local SAME_SPOT = 0.01
 local RARE_CLASSIFICATIONS = { rare = false, rareelite = true }  -- value = is elite
 local lastAlert = {}
+
+-- Tracking: while an unknown rare's vignette is on the minimap its position is sampled, so a
+-- moving rare yields a patrol track instead of a trail of fake spawn points.
+local TRACK_INTERVAL = 2      -- seconds between samples
+local TRACK_MIN_STEP = 0.001  -- normalized map units; smaller moves are not stored
+local TRACK_LOST_AFTER = 6    -- seconds without a position before the encounter ends
+local TRACK_MAX_POINTS = 300
+local MAX_TRACKS_PER_RARE = 10
+local tracking = {}           -- [vignetteGUID] = { npcID, mapID, points = {x1, y1, ...}, seen }
+local ticker
 
 local function Alert(key, name, npcID)
     if not ns.db.alerts then return end
@@ -39,6 +49,13 @@ local function SightingPosition(vignetteGUID)
     return mapID, x, y
 end
 
+local function IsTrackingRare(npcID)
+    for _, encounter in pairs(tracking) do
+        if encounter.npcID == npcID then return true end
+    end
+    return false
+end
+
 local function RecordUnknown(npcID, name, vignetteGUID, details)
     local record = ns.db.unknown[npcID]
     if not record then
@@ -51,6 +68,9 @@ local function RecordUnknown(npcID, name, vignetteGUID, details)
         record.level, record.elite = details.level, details.elite
     end
     MarkSeen(npcID)
+    -- One sighting per encounter: later positions of a rare being tracked are its movement,
+    -- not other spawn points.
+    if (vignetteGUID and tracking[vignetteGUID]) or IsTrackingRare(npcID) then return end
     local mapID, x, y = SightingPosition(vignetteGUID)
     if not mapID then return end
     for _, s in ipairs(record.sightings) do
@@ -62,6 +82,67 @@ local function RecordUnknown(npcID, name, vignetteGUID, details)
     table.insert(record.sightings, { mapID = mapID, x = x, y = y, time = time() })
 end
 
+-- Tracks ---------------------------------------------------------------------------
+local function StoreTrack(encounter)
+    local record = ns.db.unknown[encounter.npcID]
+    if not record or #encounter.points < 4 then return end  -- needs at least two points
+    record.tracks = record.tracks or {}
+    table.insert(record.tracks, { mapID = encounter.mapID, points = encounter.points, time = time() })
+    if #record.tracks > MAX_TRACKS_PER_RARE then
+        -- Keep the most informative tracks: drop the one with the fewest points.
+        local shortest = 1
+        for i, track in ipairs(record.tracks) do
+            if #track.points < #record.tracks[shortest].points then shortest = i end
+        end
+        table.remove(record.tracks, shortest)
+    end
+end
+
+local function StopTracking(vignetteGUID)
+    local encounter = tracking[vignetteGUID]
+    if not encounter then return end
+    tracking[vignetteGUID] = nil
+    StoreTrack(encounter)
+    if not next(tracking) and ticker then
+        ticker:Cancel()
+        ticker = nil
+    end
+end
+
+local function SampleTracks()
+    local now = GetTime()
+    local playerMap = C_Map.GetBestMapForUnit("player")
+    for vignetteGUID, encounter in pairs(tracking) do
+        local pos = playerMap == encounter.mapID
+            and C_VignetteInfo.GetVignettePosition(vignetteGUID, encounter.mapID)
+        if pos then
+            encounter.seen = now
+            local x, y = pos:GetXY()
+            local points = encounter.points
+            local n = #points
+            local moved = n == 0 or (x - points[n - 1]) ^ 2 + (y - points[n]) ^ 2 >= TRACK_MIN_STEP ^ 2
+            if moved and n < 2 * TRACK_MAX_POINTS then
+                points[n + 1] = x
+                points[n + 2] = y
+            end
+        elseif now - encounter.seen > TRACK_LOST_AFTER then
+            StopTracking(vignetteGUID)
+        end
+    end
+end
+
+local function StartTracking(vignetteGUID, npcID)
+    if tracking[vignetteGUID] then return end
+    local mapID = C_Map.GetBestMapForUnit("player")
+    if not mapID then return end
+    tracking[vignetteGUID] = { npcID = npcID, mapID = mapID, points = {}, seen = GetTime() }
+    SampleTracks()
+    ticker = ticker or C_Timer.NewTicker(TRACK_INTERVAL, SampleTracks)
+end
+
+-- Exposed for the offline test suite (tests/test_lua_detection.py).
+ns.Detection = { _StoreTrack = StoreTrack, _tracking = tracking }
+
 local function CheckVignette(vignetteGUID)
     local info = C_VignetteInfo.GetVignetteInfo(vignetteGUID)
     if not info or not info.objectGUID then return end
@@ -72,13 +153,25 @@ local function CheckVignette(vignetteGUID)
         Alert(npcID, ns.GetName(npcID), npcID)
     elseif info.atlasName and info.atlasName:find("VignetteKill", 1, true) then
         RecordUnknown(npcID, info.name, vignetteGUID)
+        StartTracking(vignetteGUID, npcID)
         Alert(npcID, info.name or "?", nil)
     end
 end
 
 ns.On("VIGNETTE_MINIMAP_UPDATED", function(vignetteGUID, onMinimap)
-    if onMinimap then CheckVignette(vignetteGUID) end
+    if onMinimap then
+        CheckVignette(vignetteGUID)
+    else
+        StopTracking(vignetteGUID)
+    end
 end)
+
+-- Leaving the zone or logging out ends every encounter; tracks recorded so far are kept.
+local function StopAll()
+    for vignetteGUID in pairs(tracking) do StopTracking(vignetteGUID) end
+end
+ns.On("ZONE_CHANGED_NEW_AREA", StopAll)
+ns.On("PLAYER_LOGOUT", StopAll)
 
 ns.On("VIGNETTES_UPDATED", function()
     for _, vignetteGUID in ipairs(C_VignetteInfo.GetVignettes()) do

@@ -51,6 +51,26 @@ local function Spawns(record)
     return spawns
 end
 
+-- Patrol tracks as JSON arrays [instanceID, x1, y1, x2, y2, ...] in world coordinates.
+-- Points on another continent than the first one (should not happen) are dropped.
+local function Tracks(record)
+    local out = {}
+    for _, track in ipairs(record.tracks or {}) do
+        local instance, coords = nil, {}
+        for i = 1, #track.points, 2 do
+            local inst, x, y = ToWorld({ mapID = track.mapID, x = track.points[i], y = track.points[i + 1] })
+            if inst and (instance == nil or inst == instance) then
+                instance = inst
+                coords[#coords + 1] = ("%.2f,%.2f"):format(x, y)
+            end
+        end
+        if instance and #coords >= 2 then
+            out[#out + 1] = ("[%d,%s]"):format(instance, table.concat(coords, ","))
+        end
+    end
+    return out
+end
+
 --- npcIDs of recorded rares, sorted; only those not shared yet unless includeShared.
 function Contribute.PendingIDs(includeShared)
     local ids = {}
@@ -71,11 +91,12 @@ function Contribute.BuildJson(ids)
         for _, s in ipairs(Spawns(record)) do
             spawns[#spawns + 1] = ("[%d,%.2f,%.2f]"):format(s[1], s[2], s[3])
         end
-        lines[#lines + 1] = ('    {"id":%d,"name":%s,"level":%s,"elite":%s,"spawns":[%s]}'):format(
+        lines[#lines + 1] = ('    {"id":%d,"name":%s,"level":%s,"elite":%s,"spawns":[%s],"tracks":[%s]}'):format(
             npcID, JsonString(record.name or "?"),
             record.level and tostring(record.level) or "null",
             record.elite and "true" or "false",
-            table.concat(spawns, ","))
+            table.concat(spawns, ","),
+            table.concat(Tracks(record), ","))
     end
     local version = C_AddOns and C_AddOns.GetAddOnMetadata(addonName, "Version") or "?"
     local build = GetBuildInfo and table.concat({ GetBuildInfo() }, " ", 1, 2) or "?"

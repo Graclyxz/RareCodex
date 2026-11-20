@@ -24,6 +24,9 @@ from build_data import recorded_list
 ROOT = Path(__file__).resolve().parent.parent
 MAX_RARES = 200
 MAX_SPAWNS = 50
+MAX_TRACKS = 20  # per rare in one submission
+MAX_TRACK_POINTS = 300
+MAX_STORED_TRACKS = 30  # per rare in the data file; the longest are kept
 MAX_NAME = 100
 MAX_LEVEL = 100
 MAX_COORD = 20000.0
@@ -125,9 +128,28 @@ def validate(document: Any) -> list[dict[str, Any]]:
                 "level": level,
                 "elite": bool(rec.get("elite")),
                 "spawns": clean_spawns,
+                "tracks": _validate_tracks(rec.get("tracks", []), f"{where} ({npc_id})"),
             }
         )
     return out
+
+
+def _validate_tracks(tracks: Any, where: str) -> list[list[float]]:
+    """Patrol tracks: [[map, x1, y1, x2, y2, ...], ...] with at least two points each."""
+    if not isinstance(tracks, list) or len(tracks) > MAX_TRACKS:
+        raise SubmissionError(f"{where} has invalid tracks.")
+    clean = []
+    for track in tracks:
+        if not isinstance(track, list) or len(track) < 5 or len(track) % 2 == 0:
+            raise SubmissionError(f"{where} has a malformed track.")
+        if len(track) > 1 + 2 * MAX_TRACK_POINTS:
+            raise SubmissionError(f"{where} has a track with too many points.")
+        instance = track[0]
+        if isinstance(instance, bool) or not isinstance(instance, int) or instance < 0:
+            raise SubmissionError(f"{where} has a track with an invalid map id.")
+        coords = [round(_number(v, f"{where} track point", MAX_COORD), 2) for v in track[1:]]
+        clean.append([instance, *coords])
+    return clean
 
 
 def _near(a: list[Any], b: list[Any]) -> bool:
@@ -155,6 +177,14 @@ def merge(existing: list[dict[str, Any]], incoming: list[dict[str, Any]], issue:
         if current.get("level") is None and rec["level"] is not None:
             current["level"] = rec["level"]
             changed = True
+        tracks = current.setdefault("tracks", [])
+        for track in rec["tracks"]:
+            if track not in tracks:
+                tracks.append(track)
+                changed = True
+        if len(tracks) > MAX_STORED_TRACKS:
+            tracks.sort(key=len, reverse=True)
+            del tracks[MAX_STORED_TRACKS:]
         reports = current.setdefault("reports", [])
         if issue not in reports:
             reports.append(issue)

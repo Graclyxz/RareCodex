@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from lupa import LuaRuntime
 
@@ -92,7 +94,8 @@ def test_recorded_rares_merge_only_when_new_and_placeable(tmp_path) -> None:  # 
     path.write_text(RECORDED_JSON, encoding="utf-8")
     recorded = load_recorded(path)
     rares: dict[int, dict[str, object]] = {5352: {"name": "Old Grizzlegut"}}
-    skipped = merge_recorded(rares, recorded)
+    promoted, skipped = merge_recorded(rares, recorded)
+    assert promoted == []
     assert skipped == [5352, 900002]
     assert rares[900001]["level"] == (27, 27)
     assert rares[900001]["unknown"] is True
@@ -117,7 +120,7 @@ def test_recorded_rare_serializes_without_optional_fields(tmp_path) -> None:  # 
     "name",
     [
         'Evil"\nos.exit() --',  # newline + quote: tries to end the string and inject code
-        "back\slash\\",
+        "back\\slash\\",
         "tab\tbell\a\x7f",
         "Ünïcödé Eck'alom",
     ],
@@ -128,3 +131,82 @@ def test_lua_str_round_trips_any_name(name: str) -> None:
     literal = lua_str(name)
     assert "\n" not in literal
     assert LuaRuntime().execute(f"return {literal}") == name
+
+
+# --- recorded patrol tracks and promotion -----------------------------------------
+def straight(map_id: int, x0: float, y0: float, length: float, step: float = 5.0):  # noqa: ANN201
+    n = int(length / step) + 1
+    return (map_id, [(x0 + i * step, y0) for i in range(n)])
+
+
+def test_patrol_routes_keep_the_longest_track_of_each_route() -> None:
+    from build_data import patrol_routes
+
+    short_same_route = straight(1, 0, 0, 40)
+    long_same_route = straight(1, 0, 10, 120)  # 10 yards away: same route
+    other_route = straight(1, 1000, 1000, 50)
+    standing = straight(1, 500, 500, 5)  # barely moved: not a patrol
+    routes = patrol_routes([short_same_route, long_same_route, other_route, standing])
+    assert sorted(routes) == sorted([long_same_route, other_route])
+
+
+def test_recorded_spawns_turn_routes_into_paths_and_keep_other_sightings() -> None:
+    from build_data import recorded_spawns
+
+    route = straight(1, 0, 0, 100)
+    spawns = recorded_spawns([[1, 50, 3], [1, 900, 900]], [route])
+    assert [(s["x"], s["y"], len(s["path"])) for s in spawns] == [(0, 0, 21), (900, 900, 0)]
+
+
+def test_attach_routes_to_nearest_database_spawn_or_add_new_spawn() -> None:
+    from build_data import attach_routes
+
+    rare = {"spawns": [{"map": 1, "x": 10.0, "y": 0.0, "wander": 5.0, "path": []}]}
+    near, far = straight(1, 0, 0, 100), straight(1, 5000, 5000, 100)
+    attach_routes(rare, [near, far])
+    spawns = rare["spawns"]
+    assert spawns[0]["path"] == near[1] and spawns[0]["wander"] == 0.0
+    assert spawns[1]["x"] == 5000 and spawns[1]["path"] == far[1]
+
+
+def test_merge_recorded_promotes_database_creatures_with_player_routes(tmp_path) -> None:  # noqa: ANN001
+    path = tmp_path / "forever_rares.json"
+    track = [1, *[v for i in range(30) for v in (1000.0 + 5 * i, 50.0)]]
+    path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": 3736,
+                    "name": "Mordenthal",
+                    "level": 23,
+                    "elite": True,
+                    "spawns": [[1, 1000, 50]],
+                    "tracks": [track],
+                },
+                {
+                    "id": 900001,
+                    "name": "New",
+                    "level": None,
+                    "elite": False,
+                    "spawns": [[1, 1, 2]],
+                    "tracks": [],
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    recorded = load_recorded(path)
+
+    def promote(npc_id: int, elite: bool) -> dict | None:
+        if npc_id != 3736:
+            return None
+        spawn = {"map": 1, "x": 990.0, "y": 50.0, "wander": 0.0, "path": []}
+        return {"name": "Darkslayer Mordenthal", "elite": elite, "loot": [1], "spawns": [spawn]}
+
+    rares: dict[int, dict[str, object]] = {}
+    promoted, skipped = merge_recorded(rares, recorded, promote)
+    assert promoted == [3736] and skipped == []
+    assert rares[3736]["elite"] is True and rares[3736]["loot"] == [1]
+    assert len(rares[3736]["spawns"][0]["path"]) == 30  # type: ignore[index]
+    assert rares[900001]["unknown"] is True
+    assert "tracks" not in rares[3736] and "tracks" not in rares[900001]
