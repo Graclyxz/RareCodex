@@ -18,8 +18,21 @@ local function AddMutedPair(left, right)
     GameTooltip:AddDoubleLine(left, right, MUTED[1], MUTED[2], MUTED[3], 1, 1, 1)
 end
 
+-- Item names come from the client cache; missing ones are requested and the tooltip is
+-- redrawn once they arrive (GET_ITEM_INFO_RECEIVED), if it is still showing the same rare.
+local shownOwner, shownNpcID, waitingItems
+
+ns.On("GET_ITEM_INFO_RECEIVED", function(itemID)
+    if not waitingItems or not waitingItems[itemID] then return end
+    waitingItems = nil
+    if shownOwner and GameTooltip:IsOwned(shownOwner) then
+        Tooltip.ShowRare(shownOwner, shownNpcID)
+    end
+end)
+
 function Tooltip.ShowRare(owner, npcID)
     local rare = ns.Rares[npcID]
+    shownOwner, shownNpcID, waitingItems = owner, npcID, nil
     local state = ns.PeekState(npcID)
     GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
     GameTooltip:AddLine(ns.GetName(npcID), RARE_COLOR[1], RARE_COLOR[2], RARE_COLOR[3])
@@ -56,7 +69,12 @@ function Tooltip.ShowRare(owner, npcID)
         if shown >= MAX_TOOLTIP_ITEMS then break end
         if not loot[3] then  -- skip quest items in the summary
             local name, link = C_Item.GetItemInfo(loot[1])
-            GameTooltip:AddDoubleLine(link or name or ("item:" .. loot[1]), ns.FormatChance(loot[2]))
+            if not name then
+                waitingItems = waitingItems or {}
+                waitingItems[loot[1]] = true
+                C_Item.RequestLoadItemDataByID(loot[1])
+            end
+            GameTooltip:AddDoubleLine(link or name or L["Loading..."], ns.FormatChance(loot[2]))
             shown = shown + 1
         end
     end

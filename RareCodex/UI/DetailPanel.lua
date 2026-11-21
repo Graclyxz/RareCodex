@@ -36,6 +36,23 @@ local activeTab, gearFilter = "loot", "all"
 local spellButtons, lootButtons, worldButtons, gearButtons = {}, {}, {}, {}
 
 -- Widgets ------------------------------------------------------------------------
+-- Tabs and filters: the selected one is lit with white text and a gold bar below; the
+-- others keep the normal gold text. All stay clickable (a disabled button looks inactive).
+local function AddSelectionBar(button)
+    local bar = button:CreateTexture(nil, "OVERLAY")
+    bar:SetColorTexture(1, 0.82, 0, 1)
+    bar:SetHeight(2)
+    bar:SetPoint("TOPLEFT", button, "BOTTOMLEFT", 4, -1)
+    bar:SetPoint("TOPRIGHT", button, "BOTTOMRIGHT", -4, -1)
+    button.SelectionBar = bar
+end
+
+local function SetSelected(button, selected)
+    button.SelectionBar:SetShown(selected)
+    if selected then button:LockHighlight() else button:UnlockHighlight() end
+    button:SetNormalFontObject(selected and GameFontHighlight or GameFontNormal)
+end
+
 local function Header(parent, text)
     local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     fs:SetText(text)
@@ -287,6 +304,7 @@ local function CreatePanel()
     local function Tab(key)
         local tab = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
         tab:SetSize(TAB_W, TAB_H)
+        AddSelectionBar(tab)
         tab:SetScript("OnClick", function()
             activeTab = key
             DetailPanel.Refresh()
@@ -302,6 +320,7 @@ local function CreatePanel()
         local button = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
         button:SetSize(90, 20)
         button:SetText(filter.label)
+        AddSelectionBar(button)
         button:SetScript("OnClick", function()
             gearFilter = filter.key
             DetailPanel.Refresh()
@@ -329,12 +348,19 @@ local function CreatePanel()
             StaticPopup_Show("RARECODEX_URL", nil, nil, WOWHEAD_URL:format(currentID))
         end },
     }
-    for i, def in ipairs(buttons) do
+    -- Right to left, each one wide enough for its (translated) label.
+    local previous
+    for _, def in ipairs(buttons) do
         local button = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-        button:SetSize(120, 22)
-        button:SetPoint("BOTTOMRIGHT", -PAD - (i - 1) * 126, PAD)
         button:SetText(def[1])
+        button:SetSize(math.max(120, button:GetTextWidth() + 24), 22)
+        if previous then
+            button:SetPoint("RIGHT", previous, "LEFT", -6, 0)
+        else
+            button:SetPoint("BOTTOMRIGHT", -PAD, PAD)
+        end
         button:SetScript("OnClick", def[2])
+        previous = button
     end
 end
 
@@ -482,9 +508,8 @@ local function RenderTabs(gearCount, top)
     panel.TabLoot:SetPoint("TOPLEFT", RIGHT_X, top)
     panel.TabGear:SetPoint("LEFT", panel.TabLoot, "RIGHT", 6, 0)
     panel.TabGear:SetText(L["Gear (%d)"]:format(gearCount))
-    -- The selected tab is shown pressed (disabled).
-    panel.TabLoot:SetEnabled(activeTab ~= "loot")
-    panel.TabGear:SetEnabled(activeTab ~= "gear")
+    SetSelected(panel.TabLoot, activeTab == "loot")
+    SetSelected(panel.TabGear, activeTab == "gear")
     return top - TAB_H - 10
 end
 
@@ -501,7 +526,7 @@ local function RenderGear(gear, top, visible)
 
     for i, filter in ipairs(panel.GearFilters) do
         filter:SetPoint("TOPLEFT", RIGHT_X + (i - 1) * 96, top)
-        filter:SetEnabled(gearFilter ~= filter.key)
+        SetSelected(filter, gearFilter == filter.key)
     end
     local gridTop = top - 28
     panel.GearScroll:ClearAllPoints()
