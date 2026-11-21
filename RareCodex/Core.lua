@@ -135,19 +135,50 @@ function ns.FormatRank(rare)
     return rare.elite and L["Rare Elite"] or L["Rare"]
 end
 
--- CMaNGOS creature type IDs (rare.ctype), see the header of Data/Rares.lua.
+local function ColorCode(r, g, b)
+    return ("|cff%02x%02x%02x"):format(r * 255, g * 255, b * 255)
+end
+
+-- CMaNGOS creature type IDs (rare.ctype), see the header of Data/Rares.lua. Icons are the
+-- battle pet family icons where one exists; demons and giants have no pet family.
 local CREATURE_TYPES = {
-    [1] = L["Beast"], [2] = L["Dragonkin"], [3] = L["Demon"], [4] = L["Elemental"],
-    [5] = L["Giant"], [6] = L["Undead"], [7] = L["Humanoid"], [8] = L["Critter"],
-    [9] = L["Mechanical"],
+    [1] = { L["Beast"], "Icon_PetFamily_Beast", 0.85, 0.6, 0.35 },
+    [2] = { L["Dragonkin"], "Icon_PetFamily_Dragon", 1.0, 0.45, 0.25 },
+    [3] = { L["Demon"], "Spell_Shadow_SummonImp", 0.7, 0.4, 1.0 },
+    [4] = { L["Elemental"], "Icon_PetFamily_Elemental", 0.35, 0.7, 1.0 },
+    [5] = { L["Giant"], "Ability_GolemThunderClap", 0.8, 0.75, 0.6 },
+    [6] = { L["Undead"], "Icon_PetFamily_Undead", 0.6, 0.9, 0.6 },
+    [7] = { L["Humanoid"], "Icon_PetFamily_Humanoid", 1.0, 0.85, 0.6 },
+    [8] = { L["Critter"], "Icon_PetFamily_Critter", 0.75, 0.75, 0.75 },
+    [9] = { L["Mechanical"], "Icon_PetFamily_Mechanical", 0.6, 0.8, 0.85 },
 }
 
---- "Level 9 Rare · Beast" (type omitted when unknown).
+--- Inline icon plus colored name of the rare's creature type, nil when unknown.
+function ns.FormatCreatureType(rare, iconSize)
+    local info = CREATURE_TYPES[rare.ctype]
+    if not info then return nil end
+    -- Crop the icon border (5..59 of 64) so it blends with the text.
+    local icon = ("|TInterface\\Icons\\%s:%d:%d:0:0:64:64:5:59:5:59|t"):format(
+        info[2], iconSize or 14, iconSize or 14)
+    return icon .. " " .. ColorCode(info[3], info[4], info[5]) .. info[1] .. "|r"
+end
+
+-- Same colors the game uses for mob levels: grey, green, yellow, orange, red.
+local function LevelColor(level)
+    local getColor = GetCreatureDifficultyColor or GetQuestDifficultyColor
+    local color = getColor and level and getColor(level)
+    return color and ColorCode(color.r, color.g, color.b)
+end
+
+--- "Level 9 Rare · Beast": the level colored by difficulty for the player.
 function ns.FormatLevelLine(rare, rankColor)
     local rank = ns.FormatRank(rare)
     if rankColor then rank = rankColor .. rank .. "|r" end
-    local line = L["Level %s %s"]:format(ns.FormatLevel(rare), rank)
-    local creatureType = CREATURE_TYPES[rare.ctype]
+    local level = ns.FormatLevel(rare)
+    local levelColor = LevelColor(rare.level and rare.level[2])
+    if levelColor then level = levelColor .. level .. "|r" end
+    local line = L["Level %s %s"]:format(level, rank)
+    local creatureType = ns.FormatCreatureType(rare)
     return creatureType and (line .. " · " .. creatureType) or line
 end
 

@@ -8,6 +8,13 @@
                 <Texture parentKey="Icon" setAllPoints="true"/>
             </Layer>
             <Layer level="OVERLAY">
+                <!-- Dragon above the icon of rare elites -->
+                <Texture parentKey="EliteBadge" hidden="true">
+                    <Size x="16" y="16"/>
+                    <Anchors>
+                        <Anchor point="BOTTOM" relativePoint="TOP" y="-6"/>
+                    </Anchors>
+                </Texture>
                 <!-- Number of possible spawn points, empty when there is only one -->
                 <FontString parentKey="Count" inherits="NumberFontNormalSmall">
                     <Anchors>
