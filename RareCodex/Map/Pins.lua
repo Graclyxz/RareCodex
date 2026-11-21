@@ -30,8 +30,25 @@ function RareCodexPinMixin:OnAcquired(group)
     local size = rare.elite and ELITE_PIN_SIZE or PIN_SIZE
     self:SetSize(size, size)
     self.Icon:SetAtlas(rare.elite and "VignetteKillElite" or "VignetteKill")
+    self:UpdateStatus()
     local showCount = ns.db.showSpawnCount and #group.entries > 1
     self.Count:SetText(showCount and #group.entries or "")
+end
+
+-- Dead: dimmed with a countdown. Respawn window: normal. Seen alive just now: pulsing glow.
+function RareCodexPinMixin:UpdateStatus()
+    local npcID = self.group.npcID
+    local status = ns.RareStatus(ns.Rares[npcID], ns.PeekState(npcID), time())
+    local kind = status and status.kind
+    self.Icon:SetDesaturated(kind == "dead")
+    self.Icon:SetAlpha(kind == "dead" and 0.55 or 1)
+    self.Timer:SetText(kind == "dead" and ns.FormatTimer(status.from) or "")
+    self.Glow:SetShown(kind == "seen")
+    if kind == "seen" then
+        if not self.GlowPulse:IsPlaying() then self.GlowPulse:Play() end
+    else
+        self.GlowPulse:Stop()
+    end
 end
 
 function RareCodexPinMixin:OnMouseEnter()
@@ -95,9 +112,18 @@ function Provider:OnCanvasScaleChanged()
     ns.Overlay.UpdateThickness(self:GetMap())
 end
 
+
 function ns.RefreshMap()
     if WorldMapFrame and WorldMapFrame:IsShown() then
         Provider:RefreshAllData()
+    end
+end
+
+--- Updates the status of the pins on screen (cheap: no redraw of routes or pins).
+function ns.RefreshPins()
+    if not (WorldMapFrame and WorldMapFrame:IsShown()) then return end
+    for pin in WorldMapFrame:EnumeratePinsByTemplate(PIN_TEMPLATE) do
+        pin:UpdateStatus()
     end
 end
 
@@ -110,6 +136,10 @@ function ns.SetWaypoint(uiMapID, x, y)
     C_SuperTrack.SetSuperTrackedUserWaypoint(true)
 end
 
+-- Countdowns tick while the map is open (RefreshPins returns at once when it is closed).
+local STATUS_INTERVAL = 15
+
 ns.On("PLAYER_LOGIN", function()
     WorldMapFrame:AddDataProvider(Provider)
+    C_Timer.NewTicker(STATUS_INTERVAL, ns.RefreshPins)
 end)

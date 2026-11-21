@@ -388,6 +388,8 @@ local function RenderInfo(npcID, rare)
     else
         lines[#lines + 1] = "|cffff5555" .. L["Never seen"] .. "|r"
     end
+    local status = ns.FormatStatus(ns.RareStatus(rare, state, time()))
+    if status then lines[#lines + 1] = status end
     lines[#lines + 1] = L["Kills: %d"]:format(state and state.kills or 0)
     panel.Info:SetText(table.concat(lines, "\n"))
 end

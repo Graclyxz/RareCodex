@@ -4,6 +4,16 @@
     <Frame name="RareCodexPinTemplate" mixin="RareCodexPinMixin" enableMouse="true" virtual="true">
         <Size x="22" y="22"/>
         <Layers>
+            <Layer level="BACKGROUND">
+                <!-- Pulsing glow while the rare was seen alive a moment ago -->
+                <Texture parentKey="Glow" file="Interface\Cooldown\star4" alphaMode="ADD" hidden="true">
+                    <Size x="44" y="44"/>
+                    <Anchors>
+                        <Anchor point="CENTER"/>
+                    </Anchors>
+                    <Color r="0.3" g="1" b="0.4"/>
+                </Texture>
+            </Layer>
             <Layer level="ARTWORK">
                 <Texture parentKey="Icon" setAllPoints="true"/>
             </Layer>
@@ -14,8 +24,19 @@
                         <Anchor point="BOTTOMRIGHT" x="5" y="-3"/>
                     </Anchors>
                 </FontString>
+                <!-- Respawn countdown under the pin of a dead rare -->
+                <FontString parentKey="Timer" inherits="GameFontHighlightSmallOutline">
+                    <Anchors>
+                        <Anchor point="TOP" relativePoint="BOTTOM" y="-1"/>
+                    </Anchors>
+                </FontString>
             </Layer>
         </Layers>
+        <Animations>
+            <AnimationGroup parentKey="GlowPulse" looping="BOUNCE">
+                <Alpha childKey="Glow" fromAlpha="0.35" toAlpha="1" duration="0.8" smoothing="IN_OUT"/>
+            </AnimationGroup>
+        </Animations>
         <!-- Only OnLoad here: the map canvas installs its own mouse scripts and asserts that
              pins define none. It then calls the mixin's OnMouseEnter/OnMouseLeave/click methods. -->
         <Scripts>

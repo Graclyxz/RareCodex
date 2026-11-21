@@ -62,6 +62,8 @@ function Tooltip.ShowRare(owner, npcID)
     else
         GameTooltip:AddLine(L["Never seen"], 1, 0.3, 0.3)
     end
+    local status = ns.FormatStatus(ns.RareStatus(rare, state, time()))
+    if status then GameTooltip:AddLine(status) end
     AddMutedPair(L["Kills"], state and state.kills or 0)
 
     local shown = 0

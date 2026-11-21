@@ -36,6 +36,7 @@ end
 
 local function MarkSeen(npcID)
     ns.GetState(npcID).lastSeen = time()
+    if ns.RefreshPins then ns.RefreshPins() end
 end
 
 -- Where the rare is: the vignette's own position when available, else the player's.
@@ -149,7 +150,7 @@ local function CheckVignette(vignetteGUID)
     local npcID = ns.NpcIDFromGUID(info.objectGUID)
     if not npcID then return end
     if ns.Rares[npcID] then
-        MarkSeen(npcID)
+        if not info.isDead then MarkSeen(npcID) end  -- a corpse does not mean it respawned
         Alert(npcID, ns.GetName(npcID), npcID)
     elseif info.atlasName and info.atlasName:find("VignetteKill", 1, true) then
         RecordUnknown(npcID, info.name, vignetteGUID)
@@ -185,7 +186,8 @@ local function CheckUnit(unit)
     local npcID = ns.NpcIDFromGUID(UnitGUID(unit))
     if not npcID then return end
     if ns.Rares[npcID] then
-        MarkSeen(npcID)
+        local dead = UnitIsDead(unit)
+        if not ns.IsSecret(dead) and not dead then MarkSeen(npcID) end
         return
     end
     local classification = UnitClassification(unit)
@@ -207,12 +209,25 @@ end
 -- counted when a rare we may loot dies (seen through target, focus, mouseover or a
 -- nameplate) and, as a fallback, when its corpse is looted. Each creature (GUID) counts once.
 
+-- Deaths (ours or anyone's) start the respawn timer. Only the first sighting of each corpse
+-- counts, so finding the corpse again later does not move the timer.
+local deaths = {}  -- [creatureGUID] = true, this session
+
+local function RecordDeath(guid, npcID)
+    if deaths[guid] then return end
+    deaths[guid] = true
+    local state = ns.GetState(npcID)
+    state.lastDeath = ns.db.killed[guid] or time()
+    if ns.RefreshPins then ns.RefreshPins() end
+end
+
 local function CountKill(guid, npcID)
     if ns.db.killed[guid] then return end
     ns.db.killed[guid] = time()
     local state = ns.GetState(npcID)
     state.kills = state.kills + 1
     state.lastSeen = time()
+    RecordDeath(guid, npcID)
     if ns.DetailPanel.Refresh then ns.DetailPanel.Refresh(npcID) end
 end
 
@@ -223,8 +238,12 @@ local function CheckDeath(unit)
     local npcID = ns.NpcIDFromGUID(guid)
     if not npcID or not IsTracked(npcID) or ns.db.killed[guid] then return end
     local dead, denied = UnitIsDead(unit), UnitIsTapDenied(unit)
-    if ns.IsSecret(dead) or ns.IsSecret(denied) then return end
-    if dead and not denied then CountKill(guid, npcID) end
+    if ns.IsSecret(dead) or ns.IsSecret(denied) or not dead then return end
+    if denied then
+        RecordDeath(guid, npcID)  -- killed by someone else: no kill, but the timer starts
+    else
+        CountKill(guid, npcID)
+    end
 end
 
 local WATCHED_UNITS = { target = true, focus = true, mouseover = true }

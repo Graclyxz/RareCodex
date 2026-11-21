@@ -182,6 +182,53 @@ function ns.FormatLevelLine(rare, rankColor)
     return creatureType and (line .. " · " .. creatureType) or line
 end
 
+--- Countdown text: "1h 20m", "35m" or "<1m".
+function ns.FormatTimer(seconds)
+    if seconds < 60 then return "<1m" end
+    local minutes = math.floor(seconds / 60)
+    if minutes < 60 then return ("%dm"):format(minutes) end
+    return ("%dh %02dm"):format(math.floor(minutes / 60), minutes % 60)
+end
+
+local RECENTLY_SEEN = 5 * 60
+-- A sighting this long after the death means it respawned (a corpse can keep its vignette
+-- for a few minutes, so sightings right after the death do not count).
+local ALIVE_AFTER_DEATH = 10 * 60
+
+--- Respawn state of a rare from what this character saw:
+---   { kind = "seen", ago }            alive a moment ago
+---   { kind = "dead", from, to }       respawns in from..to seconds
+---   { kind = "window", to }           may respawn now, at the latest in `to` seconds
+--- or nil when nothing is known (never seen dead, or its respawn time is long past).
+function ns.RareStatus(rare, state, now)
+    if not state then return nil end
+    local seen, death = state.lastSeen, state.lastDeath
+    local aliveAgain = seen and (not death or seen - death > ALIVE_AFTER_DEATH)
+    if aliveAgain and now - seen < RECENTLY_SEEN then
+        return { kind = "seen", ago = now - seen }
+    end
+    if not death or aliveAgain or not rare.respawn then return nil end
+    local elapsed = now - death
+    local low, high = rare.respawn[1], rare.respawn[2]
+    if elapsed < low then return { kind = "dead", from = low - elapsed, to = high - elapsed } end
+    if elapsed < high then return { kind = "window", to = high - elapsed } end
+    return nil
+end
+
+--- One line describing ns.RareStatus, colored; nil when there is nothing to say.
+function ns.FormatStatus(status)
+    if not status then return nil end
+    if status.kind == "seen" then
+        return "|cff33ff66" .. L["Seen alive %s"]:format(ns.FormatAgo(time() - status.ago)) .. "|r"
+    elseif status.kind == "dead" then
+        local from, to = ns.FormatTimer(status.from), ns.FormatTimer(status.to)
+        local range = from == to and from or (from .. " - " .. to)
+        return "|cffff6666" .. L["Dead, respawns in %s"]:format(range) .. "|r"
+    end
+    return "|cffffd200" .. L["May be up now (at the latest in %s)"]:format(
+        ns.FormatTimer(status.to)) .. "|r"
+end
+
 function ns.FormatAgo(stamp)
     local delta = time() - stamp
     if delta < 60 then return L["just now"] end
