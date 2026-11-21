@@ -21,20 +21,15 @@ end
 function RareCodexPinMixin:SetPassThroughButtons() end
 
 local PIN_SIZE, ELITE_PIN_SIZE = 22, 26
-local ELITE_BADGE_ATLAS = "nameplates-icon-elite-gold"
-local hasEliteBadge = C_Texture and C_Texture.GetAtlasInfo
-    and C_Texture.GetAtlasInfo(ELITE_BADGE_ATLAS) ~= nil
 
 function RareCodexPinMixin:OnAcquired(group)
     self.group = group
     self:SetPosition(group.primary.x, group.primary.y)
     local rare = ns.Rares[group.npcID]
-    -- Rare elites stand out: bigger pin, elite vignette and a gold dragon on top.
-    local elite = rare.elite and true or false
-    self:SetSize(elite and ELITE_PIN_SIZE or PIN_SIZE, elite and ELITE_PIN_SIZE or PIN_SIZE)
-    self.Icon:SetAtlas(elite and "VignetteKillElite" or "VignetteKill")
-    if elite and hasEliteBadge then self.EliteBadge:SetAtlas(ELITE_BADGE_ATLAS) end
-    self.EliteBadge:SetShown(elite and hasEliteBadge)
+    -- Rare elites use the game's elite vignette (star in a dragon frame), a bit bigger.
+    local size = rare.elite and ELITE_PIN_SIZE or PIN_SIZE
+    self:SetSize(size, size)
+    self.Icon:SetAtlas(rare.elite and "VignetteKillElite" or "VignetteKill")
     local showCount = ns.db.showSpawnCount and #group.entries > 1
     self.Count:SetText(showCount and #group.entries or "")
 end
