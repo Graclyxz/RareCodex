@@ -242,6 +242,13 @@ function ns.FormatStatus(status)
         ns.FormatTimer(status.to)) .. "|r"
 end
 
+--- npcID of the creature a rare patrols with as its escort (spawn.follow), or nil.
+function ns.LeaderOf(rare)
+    for _, spawn in ipairs(rare.spawns) do
+        if spawn.follow then return spawn.follow end
+    end
+end
+
 function ns.FormatAgo(stamp)
     local delta = time() - stamp
     if delta < 60 then return L["just now"] end

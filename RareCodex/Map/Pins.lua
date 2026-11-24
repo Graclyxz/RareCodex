@@ -21,25 +21,68 @@ end
 function RareCodexPinMixin:SetPassThroughButtons() end
 
 local PIN_SIZE, ELITE_PIN_SIZE = 22, 26
+-- Rares whose pins would cover each other on screen share one pin with a count
+-- (Coords.Clusters): pins closer than this many pixels at the current zoom. Zooming in
+-- splits them into their own pins.
+local CLUSTER_PX = 16
+-- Route colors of the rares sharing a pin while it is hovered, matched by a swatch in its
+-- tooltip, so each route can be told apart.
+local CLUSTER_COLORS = {
+    { 1.0, 0.78, 0.15 }, { 0.25, 0.85, 1.0 }, { 1.0, 0.4, 0.85 },
+    { 0.45, 1.0, 0.3 }, { 1.0, 0.45, 0.2 }, { 1.0, 1.0, 1.0 },
+}
 
-function RareCodexPinMixin:OnAcquired(group)
-    self.group = group
-    self:SetPosition(group.primary.x, group.primary.y)
-    local rare = ns.Rares[group.npcID]
+local function ColorsFor(groups)
+    local colors = {}
+    for i, group in ipairs(groups) do
+        colors[group] = CLUSTER_COLORS[(i - 1) % #CLUSTER_COLORS + 1]
+    end
+    return colors
+end
+
+-- A pin stands for a cluster: one rare group, or several at (nearly) the same spot.
+function RareCodexPinMixin:OnAcquired(cluster)
+    self.cluster = cluster
+    self.group = cluster.groups[1]
+    self:SetPosition(cluster.x, cluster.y)
+    local elite = false
+    for _, group in ipairs(cluster.groups) do
+        elite = elite or ns.Rares[group.npcID].elite and true or false
+    end
     -- Rare elites use the game's elite vignette (star in a dragon frame), a bit bigger.
-    local size = rare.elite and ELITE_PIN_SIZE or PIN_SIZE
+    local size = elite and ELITE_PIN_SIZE or PIN_SIZE
     self:SetSize(size, size)
-    self.Icon:SetAtlas(rare.elite and "VignetteKillElite" or "VignetteKill")
+    self.Icon:SetAtlas(elite and "VignetteKillElite" or "VignetteKill")
     self:UpdateStatus()
     self:SetPing(false)
-    local showCount = ns.db.showSpawnCount and #group.entries > 1
-    self.Count:SetText(showCount and #group.entries or "")
+    if #cluster.groups > 1 then
+        self.Count:SetText(#cluster.groups)  -- number of rares sharing the pin
+    else
+        local showCount = ns.db.showSpawnCount and #self.group.entries > 1
+        self.Count:SetText(showCount and #self.group.entries or "")
+    end
+end
+
+-- The pin's status across its rares: seen if any was seen, dead only if all are dead (with
+-- the soonest respawn), else nothing special.
+local function ClusterStatus(cluster)
+    local now, soonest, allDead = time(), nil, true
+    for _, group in ipairs(cluster.groups) do
+        local status = ns.RareStatus(ns.Rares[group.npcID], ns.PeekState(group.npcID), now)
+        local kind = status and status.kind
+        if kind == "seen" then return status end
+        if kind == "dead" then
+            if not soonest or status.from < soonest.from then soonest = status end
+        else
+            allDead = false
+        end
+    end
+    return allDead and soonest or nil
 end
 
 -- Dead: dimmed with a countdown. Respawn window: normal. Seen alive just now: pulsing glow.
 function RareCodexPinMixin:UpdateStatus()
-    local npcID = self.group.npcID
-    local status = ns.RareStatus(ns.Rares[npcID], ns.PeekState(npcID), time())
+    local status = ClusterStatus(self.cluster)
     local kind = status and status.kind
     self.Icon:SetDesaturated(kind == "dead")
     self.Icon:SetAlpha(kind == "dead" and 0.55 or 1)
@@ -74,9 +117,40 @@ function RareCodexPinMixin:SetPing(on, soft)
 end
 
 function RareCodexPinMixin:OnMouseEnter()
-    ns.Tooltip.ShowRare(self, self.group.npcID)
-    ns.Overlay.Highlight(self:GetMap(), self.group)
+    local groups = self.cluster.groups
+    local colors = #groups > 1 and ColorsFor(groups) or nil
+    if colors then
+        ns.Tooltip.ShowCluster(self, groups, colors)
+    else
+        ns.Tooltip.ShowRare(self, self.group.npcID)
+    end
+    ns.Overlay.Highlight(self:GetMap(), groups, colors)
     self:SetPing(true, true)
+end
+
+-- Menu to pick one of the rares sharing a pin; hovering an entry shows only its route.
+local function ChooseRare(owner, groups)
+    if not (MenuUtil and MenuUtil.CreateContextMenu) then
+        ns.DetailPanel.Show(groups[1].npcID)  -- client without the menu API
+        return
+    end
+    local map, colors = owner:GetMap(), ColorsFor(groups)
+    MenuUtil.CreateContextMenu(owner, function(_, root)
+        root:CreateTitle(L["Rares here"])
+        for _, group in ipairs(groups) do
+            local rare = ns.Rares[group.npcID]
+            local icon = ns.CreatureTypeIcon(rare, 14)
+            local label = ("%s%s (%s)"):format(icon and (icon .. " ") or "",
+                ns.GetName(group.npcID), ns.FormatColoredLevel(rare))
+            local button = root:CreateButton(label, function() ns.DetailPanel.Show(group.npcID) end)
+            if button.SetOnEnter and button.SetOnLeave then
+                button:SetOnEnter(function()
+                    ns.Overlay.Highlight(map, group, { [group] = colors[group] })
+                end)
+                button:SetOnLeave(function() ns.Overlay.Highlight(map, nil) end)
+            end
+        end
+    end)
 end
 
 function RareCodexPinMixin:OnMouseLeave()
@@ -91,11 +165,13 @@ function RareCodexPinMixin:HandleClick(button)
     local now = GetTime()
     if self.lastClick == now then return end
     self.lastClick = now
-    local group = self.group
+    local cluster = self.cluster
     if button == "LeftButton" and IsShiftKeyDown() then
-        ns.SetWaypoint(self:GetMap():GetMapID(), group.primary.x, group.primary.y)
+        ns.SetWaypoint(self:GetMap():GetMapID(), cluster.x, cluster.y)
+    elseif button == "LeftButton" and #cluster.groups > 1 then
+        ChooseRare(self, cluster.groups)
     elseif button == "LeftButton" then
-        ns.DetailPanel.Show(group.npcID)
+        ns.DetailPanel.Show(self.group.npcID)
     elseif button == "RightButton" then
         local map = self:GetMap()
         if map.NavigateToParentMap then map:NavigateToParentMap() end
@@ -125,23 +201,54 @@ local function GroupsToShow(mapID)
     return ns.Coords.GroupsForMap(mapID), scope
 end
 
+-- Pins for the groups, clustered at the map's current zoom.
+local function ClustersAtZoom(map, groups)
+    local canvas, scale = map:GetCanvas(), math.max(map:GetCanvasScale(), 0.01)
+    local width, height = canvas:GetWidth() * scale, canvas:GetHeight() * scale
+    if width <= 0 or height <= 0 then return ns.Coords.Clusters(groups, 0) end
+    return ns.Coords.Clusters(groups, CLUSTER_PX / width, CLUSTER_PX / height)
+end
+
+local function AcquirePins(map, clusters)
+    for _, cluster in ipairs(clusters) do
+        map:AcquirePin(PIN_TEMPLATE, cluster)
+    end
+end
+
 function Provider:RefreshAllData()
     self:RemoveAllData()
     local map = self:GetMap()
     local mapID = map:GetMapID()
     local groups, scope = GroupsToShow(mapID)
+    self.groups, self.clusterCount = groups, 0
     if groups then
         -- Routes and spawn dots only on zone maps: on continents they are unreadable and slow.
         if scope == "zone" then ns.Overlay.Draw(map, mapID, groups) end
-        for _, group in ipairs(groups) do
-            map:AcquirePin(PIN_TEMPLATE, group)
-        end
+        local clusters = ClustersAtZoom(map, groups)
+        self.clusterCount = #clusters
+        AcquirePins(map, clusters)
     end
     ns.RareList.SetGroups(map, groups)
 end
 
+-- Zooming: line thickness follows at once; pins are clustered again once the zoom settles,
+-- and only replaced when the clusters change.
+local RECLUSTER_DELAY = 0.15
+local reclusterToken = 0
+
 function Provider:OnCanvasScaleChanged()
-    ns.Overlay.UpdateThickness(self:GetMap())
+    local map = self:GetMap()
+    ns.Overlay.UpdateThickness(map)
+    reclusterToken = reclusterToken + 1
+    local token = reclusterToken
+    C_Timer.After(RECLUSTER_DELAY, function()
+        if token ~= reclusterToken or not self.groups or not map:IsShown() then return end
+        local clusters = ClustersAtZoom(map, self.groups)
+        if #clusters == self.clusterCount then return end
+        self.clusterCount = #clusters
+        map:RemoveAllPinsByTemplate(PIN_TEMPLATE)
+        AcquirePins(map, clusters)
+    end)
 end
 
 function ns.RefreshMap()
@@ -150,11 +257,18 @@ function ns.RefreshMap()
     end
 end
 
---- Pings the pin of a rare group (nil stops every ping).
+local function HasGroup(cluster, group)
+    for _, g in ipairs(cluster.groups) do
+        if g == group then return true end
+    end
+    return false
+end
+
+--- Pings the pin showing a rare group (nil stops every ping).
 function ns.PingRare(group)
     if not (WorldMapFrame and WorldMapFrame:IsShown()) then return end
     for pin in WorldMapFrame:EnumeratePinsByTemplate(PIN_TEMPLATE) do
-        pin:SetPing(group ~= nil and pin.group == group)
+        pin:SetPing(group ~= nil and HasGroup(pin.cluster, group))
     end
 end
 

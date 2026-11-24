@@ -141,6 +141,32 @@ function Coords.GroupsForMap(uiMapID)
     return groups
 end
 
+--- Rare groups whose pins would cover each other, merged into clusters: one pin each.
+--- A group joins the first cluster whose position is within `rx` horizontally and `ry`
+--- vertically (normalized map units, `ry` defaults to `rx`); the cluster keeps the position
+--- of its first group, so a lone rare's pin stays exactly on its spawn.
+--- Returns a list of { x, y, groups = { group, ... } }.
+function Coords.Clusters(groups, rx, ry)
+    ry = ry or rx
+    local clusters = {}
+    for _, group in ipairs(groups) do
+        local x, y = group.primary.x, group.primary.y
+        local home
+        for _, cluster in ipairs(clusters) do
+            if math.abs(cluster.x - x) < rx and math.abs(cluster.y - y) < ry then
+                home = cluster
+                break
+            end
+        end
+        if home then
+            home.groups[#home.groups + 1] = group
+        else
+            clusters[#clusters + 1] = { x = x, y = y, groups = { group } }
+        end
+    end
+    return clusters
+end
+
 --- Flat list {x1, y1, x2, y2, ...} describing the spawn's patrol path or wander area.
 --- Returns points, isClosed.
 function Coords.ShapeForSpawn(spawn, uiMapID)

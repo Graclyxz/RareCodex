@@ -31,6 +31,7 @@ AI_ACTION_FLEE = 25
 AI_ACTION_SLOTS = (1, 2, 3)
 
 MOVEMENT_WAYPOINT = 2
+LINK_FOLLOW = 0x200  # creature_linking flag: the spawn follows its master around
 GEAR = {2, 4}  # item classes listed from world-drop pools: weapons and armor
 CREATURE_TYPE_NONE = {0, 10}  # "not specified"
 
@@ -39,6 +40,7 @@ TABLES = {
     "creature",
     "creature_movement",
     "creature_movement_template",
+    "creature_linking",
     "creature_loot_template",
     "reference_loot_template",
     "creature_ai_scripts",
@@ -140,9 +142,17 @@ class Builder:
         # and players report them by ID.
         self.templates = {int(t["Entry"]): t for t in db.rows("creature_template")}
         self.spawn_rows: dict[int, list[Row]] = defaultdict(list)
+        self.spawn_by_guid: dict[int, Row] = {}
         for row in db.rows("creature"):
             if row["map"] in OPEN_WORLD_MAPS:
                 self.spawn_rows[int(row["id"])].append(row)
+                self.spawn_by_guid[int(row["guid"])] = row
+        # Escorts: spawn guid -> guid of the creature it follows (rares patrolling in a group).
+        self.leader_of: dict[int, int] = {
+            int(r["guid"]): int(r["master_guid"])
+            for r in db.rows("creature_linking")
+            if int(r["flag"]) & LINK_FOLLOW
+        }
 
     # --- abilities -------------------------------------------------------
     def spells(self, tpl: Row) -> list[int]:
@@ -202,6 +212,31 @@ class Builder:
         rows = sorted(rows, key=lambda r: int(r["Point"]))
         return [(float(r["PositionX"]), float(r["PositionY"])) for r in rows]
 
+    def leader(self, spawn: Row) -> Row | None:
+        """Spawn of the creature this spawn follows, if it is an escort."""
+        master = self.leader_of.get(int(spawn["guid"]))
+        return self.spawn_by_guid.get(master) if master is not None else None
+
+    def spawn(self, s: Row) -> dict[str, object]:
+        path = self.path_for(s) if s["MovementType"] == MOVEMENT_WAYPOINT else []
+        spawn: dict[str, object] = {
+            "map": int(s["map"]),
+            "x": float(s["position_x"]),
+            "y": float(s["position_y"]),
+            "wander": float(s["spawndist"]) if s["MovementType"] == 1 else 0.0,
+            "path": path,
+        }
+        leader = self.leader(s)
+        if leader is not None:
+            # Escorts walk their leader's route. When the leader is a rare the addon draws
+            # it from there; otherwise the escort gets a copy so its route still shows.
+            spawn["follow"] = int(leader["id"])
+            if not path and self.templates[int(leader["id"])]["Rank"] not in RARE_RANKS:
+                if leader["MovementType"] == MOVEMENT_WAYPOINT:
+                    spawn["path"] = self.path_for(leader)
+                    spawn["wander"] = 0.0
+        return spawn
+
     # --- assembly --------------------------------------------------------
     def entry(self, entry: int, elite: bool) -> dict[str, object] | None:
         """Full data for any creature with open-world spawns, or None without spawns."""
@@ -210,18 +245,7 @@ class Builder:
         if tpl is None or not rows:
             return None
         items, world = self.loot_for(int(tpl["LootId"] or 0))
-        spawn_list = []
-        for s in rows:
-            path = self.path_for(s) if s["MovementType"] == MOVEMENT_WAYPOINT else []
-            spawn_list.append(
-                {
-                    "map": int(s["map"]),
-                    "x": float(s["position_x"]),
-                    "y": float(s["position_y"]),
-                    "wander": float(s["spawndist"]) if s["MovementType"] == 1 else 0.0,
-                    "path": path,
-                }
-            )
+        spawn_list = [self.spawn(s) for s in rows]
         return {
             "name": str(tpl["Name"]),
             "level": (int(tpl["MinLevel"]), int(tpl["MaxLevel"])),
@@ -328,6 +352,8 @@ def to_lua(entry: int, rare: dict[str, object]) -> str:
         if s["path"]:
             flat = ",".join(f"{lua_num(x)},{lua_num(y)}" for x, y in s["path"])
             extra.append(f"path={{{flat}}}")
+        if s.get("follow"):
+            extra.append(f"follow={s['follow']}")
         spawn_parts.append("{" + ",".join(fields + extra) + "}")
     parts.append("spawns={" + ",".join(spawn_parts) + "}")
     if world:
@@ -348,7 +374,8 @@ HEADER = """\
 -- GENERATED FILE - do not edit by hand. Run tools/build_data.py instead.
 -- Sources: CMaNGOS Classic DB (GPL-3.0) and data/forever_rares.json (rares recorded in
 -- game, marked unknown=true). Chances are estimates.
--- spawns: {instanceMapID, worldX, worldY, wander=yards, path={x1,y1,x2,y2,...}}
+-- spawns: {instanceMapID, worldX, worldY, wander=yards, path={x1,y1,x2,y2,...},
+--          follow=npcID of the creature this escort patrols with}
 -- loot / items: {itemID, chancePercent, isQuestItem, measuredInForever}
 -- forever: kills behind the measured chances (data/forever_loot.json)
 -- ctype: creature type (1 beast, 2 dragonkin, 3 demon, 4 elemental, 5 giant, 6 undead,

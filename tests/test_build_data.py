@@ -313,3 +313,64 @@ def test_recorded_rares_carry_maintainer_spells_and_promotion_merges_them(tmp_pa
     merge_recorded(rares, load_recorded(path), promote)
     assert rares[3736]["spells"] == [9532, 133]  # database first, no duplicates
     assert rares[900001]["spells"] == [8435]
+
+
+# --- escorts patrolling with a leader ----------------------------------------------
+class FakeDump:
+    def __init__(self, tables: dict[str, list[dict[str, object]]]) -> None:
+        self.tables = tables
+
+    def rows(self, table: str) -> list[dict[str, object]]:
+        return self.tables.get(table, [])
+
+
+def spawn_row(guid: int, npc: int, movement: int = 0) -> dict[str, object]:
+    return {
+        "guid": guid,
+        "id": npc,
+        "map": 1,
+        "position_x": float(guid),
+        "position_y": 0.0,
+        "spawndist": 0,
+        "MovementType": movement,
+    }
+
+
+def test_escorts_follow_their_leader_and_copy_a_non_rare_leaders_route() -> None:
+    from build_data import Builder
+
+    waypoint = 2
+    db = FakeDump(
+        {
+            "creature_template": [
+                {"Entry": 1, "Rank": 4},  # rare leader
+                {"Entry": 2, "Rank": 4},  # its escort
+                {"Entry": 3, "Rank": 4},  # escort of a normal creature
+                {"Entry": 4, "Rank": 0},  # normal leader
+            ],
+            "creature": [
+                spawn_row(10, 1, waypoint),
+                spawn_row(20, 2),
+                spawn_row(30, 3),
+                spawn_row(40, 4, waypoint),
+                spawn_row(50, 2),  # same rare, a spawn that is not linked
+            ],
+            "creature_linking": [
+                {"guid": 20, "master_guid": 10, "flag": 0x200},
+                {"guid": 30, "master_guid": 40, "flag": 0x200},
+                {"guid": 50, "master_guid": 10, "flag": 0x1},  # linked, but not following
+            ],
+            "creature_movement": [
+                {"Id": 10, "Point": 1, "PositionX": 1.0, "PositionY": 1.0},
+                {"Id": 10, "Point": 2, "PositionX": 2.0, "PositionY": 2.0},
+                {"Id": 40, "Point": 1, "PositionX": 7.0, "PositionY": 7.0},
+                {"Id": 40, "Point": 2, "PositionX": 8.0, "PositionY": 8.0},
+            ],
+        }
+    )
+    builder = Builder(db)  # type: ignore[arg-type]
+    spawns = {int(s["guid"]): builder.spawn(s) for s in db.rows("creature")}  # type: ignore[call-overload]
+    assert spawns[20]["follow"] == 1 and spawns[20]["path"] == []  # drawn from the rare leader
+    assert spawns[30]["follow"] == 4 and spawns[30]["path"] == [(7.0, 7.0), (8.0, 8.0)]
+    assert "follow" not in spawns[50] and "follow" not in spawns[10]
+    assert "follow=1" in to_lua(2, {"name": "E", "spells": [], "loot": [], "spawns": [spawns[20]]})

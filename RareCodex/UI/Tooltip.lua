@@ -30,6 +30,51 @@ ns.On("GET_ITEM_INFO_RECEIVED", function(itemID)
     end
 end)
 
+-- Small square in a route's color, the legend of the routes of rares sharing a pin.
+local function Swatch(color)
+    return ("|TInterface\\Buttons\\WHITE8X8:10:10:0:0:8:8:0:8:0:8:%d:%d:%d|t "):format(
+        math.floor(color[1] * 255), math.floor(color[2] * 255), math.floor(color[3] * 255))
+end
+
+--- Pin shared by several rares: one short entry per rare (name, level, type and status).
+--- `colors` ([group] = {r, g, b}) are their route colors on the map, shown as a legend.
+function Tooltip.ShowCluster(owner, groups, colors)
+    shownOwner, shownNpcID, waitingItems = nil, nil, nil
+    GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+    GameTooltip:AddLine(L["%d rares here"]:format(#groups), RARE_COLOR[1], RARE_COLOR[2], RARE_COLOR[3])
+    local now = time()
+    for _, group in ipairs(groups) do
+        local rare = ns.Rares[group.npcID]
+        local color = rare.elite and "|cffffd200" or "|cff66ccff"
+        GameTooltip:AddLine(" ")
+        -- An escort has no route of its own: it shows its leader's color when the leader
+        -- shares the pin.
+        local leader = ns.LeaderOf(rare)
+        local routeColor = colors and ns.Overlay.HasShape(group) and colors[group]
+        if colors and not routeColor and leader then
+            for _, other in ipairs(groups) do
+                if other.npcID == leader and ns.Overlay.HasShape(other) then
+                    routeColor = colors[other]
+                end
+            end
+        end
+        local swatch = routeColor and Swatch(routeColor) or ""
+        GameTooltip:AddDoubleLine(swatch .. color .. ns.GetName(group.npcID) .. "|r",
+            ns.FormatColoredLevel(rare) .. " " .. ns.FormatRank(rare))
+        local creatureType = ns.FormatCreatureType(rare)
+        if leader then
+            local escort = "|cffb3b3b3" .. L["Patrols with %s"]:format(ns.GetName(leader)) .. "|r"
+            creatureType = creatureType and (creatureType .. "  " .. escort) or escort
+        end
+        if creatureType then GameTooltip:AddLine(creatureType) end
+        local status = ns.FormatStatus(ns.RareStatus(rare, ns.PeekState(group.npcID), now))
+        if status then GameTooltip:AddLine(status) end
+    end
+    GameTooltip:AddLine(" ")
+    GameTooltip:AddLine(L["Click: choose a rare   Shift-click: waypoint"], 0.5, 1, 0.5)
+    GameTooltip:Show()
+end
+
 function Tooltip.ShowRare(owner, npcID)
     local rare = ns.Rares[npcID]
     shownOwner, shownNpcID, waitingItems = owner, npcID, nil
@@ -41,6 +86,10 @@ function Tooltip.ShowRare(owner, npcID)
     if #rare.spawns > 1 then
         GameTooltip:AddLine(L["Spawns at one of %d points (dots on the map)"]:format(#rare.spawns),
             MUTED[1], MUTED[2], MUTED[3])
+    end
+    local leader = ns.LeaderOf(rare)
+    if leader then
+        GameTooltip:AddLine(L["Patrols with %s"]:format(ns.GetName(leader)), MUTED[1], MUTED[2], MUTED[3])
     end
     if rare.unknown then
         GameTooltip:AddLine(L["Recorded in game: no ability or loot data yet."], 1, 0.82, 0, true)

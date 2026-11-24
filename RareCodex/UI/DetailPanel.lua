@@ -459,7 +459,11 @@ local function RenderSpells(rare, top)
     end
     if rare.flee then behavior[#behavior + 1] = L["Flees at %d%% health."]:format(rare.flee) end
     local spawn = rare.spawns[1]
-    if spawn.path then
+    local leader = ns.LeaderOf(rare)
+    if leader then
+        behavior[#behavior + 1] = L["Patrols as the escort of %s (their route on the map)."]:format(
+            ns.GetName(leader))
+    elseif spawn.path then
         behavior[#behavior + 1] = L["Patrols a fixed route (line on the map)."]
     elseif spawn.wander then
         behavior[#behavior + 1] = L["Wanders within %d yards (shaded area on the map)."]:format(spawn.wander)

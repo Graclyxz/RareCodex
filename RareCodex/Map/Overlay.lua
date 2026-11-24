@@ -52,7 +52,8 @@ local REDRAW_DELAY = 0.15  -- seconds after the last zoom step before geometry i
 local frame
 local pools, active = {}, {}
 local shapes = {}  -- [group] = list of parts { kind, lines = {}, caps = {}, area = texture? }
-local highlighted
+local highlighted        -- set of highlighted groups, nil when none
+local highlightedTarget  -- what Highlight was given, to restore it after a redraw
 local lastDraw     -- { map, uiMapID, groups } to rebuild geometry after zooming
 local redrawToken = 0
 
@@ -85,7 +86,7 @@ function Overlay.Clear()
         wipe(list)
     end
     wipe(shapes)
-    highlighted = nil
+    highlighted, highlightedTarget = nil, nil
 end
 
 -- Geometry ------------------------------------------------------------------------
@@ -232,16 +233,19 @@ Overlay._ConvexHull = ConvexHull
 Overlay._SpawnArea = SpawnArea
 
 -- Styling -------------------------------------------------------------------------
+-- Mode of a group's shapes, plus its own highlight color when one was given.
 local function ModeFor(group)
     if highlighted == nil then return "normal" end
-    return group == highlighted and "highlight" or "dim"
+    local mark = highlighted[group]
+    if not mark then return "dim" end
+    return "highlight", type(mark) == "table" and mark or nil
 end
 
-local function ApplyLook(map, shape, mode)
+local function ApplyLook(map, shape, mode, color)
     local look = (mode == "highlight" and LOOKS.highlight or LOOKS.normal)[shape.kind]
     local alpha = mode == "dim" and DIM_ALPHA or 1
     local width = look.thickness / math.max(map:GetCanvasScale(), 0.01)
-    local c = look.core
+    local c = color and { color[1], color[2], color[3], 1 } or look.core
     for _, line in ipairs(shape.lines) do
         line:SetThickness(width)
         if line.isCore then
@@ -260,13 +264,15 @@ local function ApplyLook(map, shape, mode)
     end
     if shape.area then
         local a = look.area
-        shape.area:SetVertexColor(a[1], a[2], a[3], a[4] * alpha)
+        local r, g, b = a[1], a[2], a[3]
+        if color then r, g, b = color[1], color[2], color[3] end
+        shape.area:SetVertexColor(r, g, b, a[4] * alpha)
     end
 end
 
 local function ApplyGroupLook(map, group)
-    local mode = ModeFor(group)
-    for _, part in ipairs(shapes[group]) do ApplyLook(map, part, mode) end
+    local mode, color = ModeFor(group)
+    for _, part in ipairs(shapes[group]) do ApplyLook(map, part, mode, color) end
 end
 
 -- Drawing -------------------------------------------------------------------------
@@ -384,14 +390,39 @@ function Overlay.UpdateThickness(map)
     C_Timer.After(REDRAW_DELAY, function()
         if token ~= redrawToken or not lastDraw or lastDraw.map ~= map then return end
         if map:GetMapID() ~= lastDraw.uiMapID then return end
-        local keep = highlighted
+        local keep = highlightedTarget
         Overlay.Draw(map, lastDraw.uiMapID, lastDraw.groups)
-        if keep then Overlay.Highlight(map, keep) end
+        if keep then Overlay.Highlight(map, keep[1], keep[2]) end
     end)
 end
 
---- Emphasize one rare group's routes and spawn dots and dim the rest; nil resets.
-function Overlay.Highlight(map, group)
-    highlighted = group and shapes[group] and group or nil
+-- The drawn group of the rare an escort patrols with, if any.
+local function LeaderGroup(group)
+    local leader = ns.LeaderOf(ns.Rares[group.npcID])
+    if not leader then return nil end
+    for g in pairs(shapes) do
+        if g.npcID == leader then return g end
+    end
+end
+
+--- Emphasize the routes and spawn dots of one rare group, or of a list of them (the rares
+--- sharing a pin), and dim the rest; nil resets. `colors` ([group] = {r, g, b}) gives
+--- groups their own highlight color, so rares sharing a pin can be told apart.
+function Overlay.Highlight(map, target, colors)
+    highlightedTarget, highlighted = target and { target, colors }, nil
+    local list = target and (target.npcID and { target } or target) or {}
+    for _, group in ipairs(list) do
+        -- An escort has no route of its own: light its leader's.
+        local shown = shapes[group] and group or LeaderGroup(group)
+        if shown and not (highlighted and highlighted[shown]) then
+            highlighted = highlighted or {}
+            highlighted[shown] = colors and (colors[shown] or colors[group]) or true
+        end
+    end
     for g in pairs(shapes) do ApplyGroupLook(map, g) end
+end
+
+--- Whether a rare group has anything drawn (route, wander area or spawn dots).
+function Overlay.HasShape(group)
+    return shapes[group] ~= nil
 end
