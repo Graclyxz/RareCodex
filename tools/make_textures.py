@@ -7,6 +7,7 @@ the line's center, in texels, with soft edges so lines stay smooth at any zoom.
     line-*.tga  16x16, profile across the rows (u runs along the line, v across it)
     cap-*.tga   16x16, the same profile as a disc, drawn at every joint and end
     area.tga    64x64 soft disc used to fill wander areas
+    ring.tga    64x64 soft ring, the ping around a rare's pin hovered in the rare list
 """
 
 from __future__ import annotations
@@ -70,6 +71,11 @@ def area_pixel(x: int, y: int) -> Pixel:
     return (255, 255, 255, to_byte(ramp(d, 0.55, 1.0)))
 
 
+def ring_pixel(x: int, y: int) -> Pixel:
+    d = math.hypot(x + 0.5 - 32, y + 0.5 - 32)
+    return (255, 255, 255, to_byte(ramp(abs(d - 26), 2.0, 5.0)))
+
+
 def main() -> None:
     MEDIA.mkdir(parents=True, exist_ok=True)
     write_tga(MEDIA / "line-outline.tga", 16, 16, line_pixel(outline_alpha, 0))
@@ -77,6 +83,7 @@ def main() -> None:
     write_tga(MEDIA / "cap-outline.tga", 16, 16, disc_pixel(outline_alpha, 0))
     write_tga(MEDIA / "cap-core.tga", 16, 16, disc_pixel(core_alpha, 255))
     write_tga(MEDIA / "area.tga", 64, 64, area_pixel)
+    write_tga(MEDIA / "ring.tga", 64, 64, ring_pixel)
     print(f"Wrote textures to {MEDIA}")
 
 

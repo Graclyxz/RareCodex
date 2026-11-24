@@ -31,6 +31,7 @@ function RareCodexPinMixin:OnAcquired(group)
     self:SetSize(size, size)
     self.Icon:SetAtlas(rare.elite and "VignetteKillElite" or "VignetteKill")
     self:UpdateStatus()
+    self:SetPing(false)
     local showCount = ns.db.showSpawnCount and #group.entries > 1
     self.Count:SetText(showCount and #group.entries or "")
 end
@@ -51,13 +52,36 @@ function RareCodexPinMixin:UpdateStatus()
     end
 end
 
+-- Ping rings around the pin, to find a rare hovered in the rare list among many pins.
+-- Soft: a smaller, fainter ring without the glow, for the pin under the mouse.
+local PING_SIZE, SOFT_PING_SIZE = 72, 44
+
+function RareCodexPinMixin:SetPing(on, soft)
+    local ping = self.Ping
+    ping:SetShown(on)
+    if on then
+        ping:SetFrameLevel(self:GetFrameLevel() + 20)  -- above the neighbouring pins
+        ping:SetAlpha(soft and 0.6 or 1)
+        local size = soft and SOFT_PING_SIZE or PING_SIZE
+        ping.Ring1:SetSize(size, size)
+        ping.Halo:SetShown(not soft)
+        ping.Waves:Play()
+        ping.Breath:Play()
+    else
+        ping.Waves:Stop()
+        ping.Breath:Stop()
+    end
+end
+
 function RareCodexPinMixin:OnMouseEnter()
     ns.Tooltip.ShowRare(self, self.group.npcID)
     ns.Overlay.Highlight(self:GetMap(), self.group)
+    self:SetPing(true, true)
 end
 
 function RareCodexPinMixin:OnMouseLeave()
     GameTooltip:Hide()
+    self:SetPing(false)
     ns.Overlay.Highlight(self:GetMap(), nil)
 end
 
@@ -123,6 +147,14 @@ end
 function ns.RefreshMap()
     if WorldMapFrame and WorldMapFrame:IsShown() then
         Provider:RefreshAllData()
+    end
+end
+
+--- Pings the pin of a rare group (nil stops every ping).
+function ns.PingRare(group)
+    if not (WorldMapFrame and WorldMapFrame:IsShown()) then return end
+    for pin in WorldMapFrame:EnumeratePinsByTemplate(PIN_TEMPLATE) do
+        pin:SetPing(group ~= nil and pin.group == group)
     end
 end
 

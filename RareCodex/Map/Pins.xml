@@ -32,6 +32,37 @@
                 </FontString>
             </Layer>
         </Layers>
+        <Frames>
+            <!-- Ping rings while the rare is hovered in the rare list. A child frame so they
+                 draw above the neighbouring pins and do not take the mouse. -->
+            <Frame parentKey="Ping" setAllPoints="true" hidden="true">
+                <Layers>
+                    <Layer level="OVERLAY">
+                        <Texture parentKey="Ring1" file="Interface\AddOns\RareCodex\Media\ring" alphaMode="ADD">
+                            <Size x="72" y="72"/>
+                            <Anchors><Anchor point="CENTER"/></Anchors>
+                            <Color r="1" g="0.82" b="0.1"/>
+                        </Texture>
+                        <Texture parentKey="Halo" file="Interface\Cooldown\star4" alphaMode="ADD">
+                            <Size x="48" y="48"/>
+                            <Anchors><Anchor point="CENTER"/></Anchors>
+                            <Color r="1" g="0.85" b="0.2"/>
+                        </Texture>
+                    </Layer>
+                </Layers>
+                <Animations>
+                    <!-- A ring growing from the pin and fading, like a minimap ping. -->
+                    <AnimationGroup parentKey="Waves" looping="REPEAT">
+                        <Scale childKey="Ring1" fromScaleX="0.25" fromScaleY="0.25" toScaleX="1" toScaleY="1" duration="1" order="1"/>
+                        <Alpha childKey="Ring1" fromAlpha="1" toAlpha="0" duration="1" order="1"/>
+                    </AnimationGroup>
+                    <!-- And a steady glow behind the pin, breathing. -->
+                    <AnimationGroup parentKey="Breath" looping="BOUNCE">
+                        <Alpha childKey="Halo" fromAlpha="0.45" toAlpha="1" duration="0.5" order="1"/>
+                    </AnimationGroup>
+                </Animations>
+            </Frame>
+        </Frames>
         <Animations>
             <AnimationGroup parentKey="GlowPulse" looping="BOUNCE">
                 <Alpha childKey="Glow" fromAlpha="0.35" toAlpha="1" duration="0.8" smoothing="IN_OUT"/>
