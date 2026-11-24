@@ -1,24 +1,23 @@
--- RareList: list of the rares on the world map being viewed, in the map's bottom left corner.
--- Its title folds it; hovering a row highlights the rare's pin and route, clicking opens it.
+-- RareList: side panel next to the world map listing the rares of the map being viewed, so
+-- the map itself stays clear. A button on the map's right edge opens it; hovering a row
+-- highlights the rare's pin and route, clicking opens its details.
 local _, ns = ...
 local L = ns.L
 
 local RareList = {}
 ns.RareList = RareList
 
-local WIDTH = 240
+local WIDTH = 250
 local ROW_H = 20
-local HEADER_H = 22
-local INSET = 4
+local HEADER_H = 30
+local INSET = 6
 local SCROLLBAR_W = 22
-local MAX_HEIGHT_MARGIN = 80   -- room left above the list inside the map
-local EXPANDED, COLLAPSED = "Interface\\Buttons\\UI-MinusButton-Up", "Interface\\Buttons\\UI-PlusButton-Up"
 
 -- Lower sorts first: rares that may be up before the ones known to be dead.
 local STATUS_ORDER = { seen = 1, window = 2, none = 3, dead = 4 }
 
 local map, groups = nil, {}
-local frame
+local frame, openButton
 local rows = {}
 
 --- Rows for the given groups (one per rare) sorted by status, then level, then name.
@@ -94,40 +93,38 @@ local function GetRow(index)
     return row
 end
 
--- Frame --------------------------------------------------------------------------
+-- Frames -------------------------------------------------------------------------
+local function SetOpen(open)
+    ns.db.listCollapsed = not open
+    RareList.Update()
+end
+
 local function Create()
-    local container = WorldMapFrame.ScrollContainer
+    -- Button on the map's right edge, at the bottom: the top is where other addons put theirs.
+    openButton = CreateFrame("Button", nil, WorldMapFrame, "UIPanelButtonTemplate")
+    openButton:SetHeight(26)
+    openButton:SetPoint("BOTTOMLEFT", WorldMapFrame, "BOTTOMRIGHT", 4, 0)
+    openButton:SetScript("OnClick", function() SetOpen(true) end)
+
+    -- Panel beside the map, as tall as it.
     frame = CreateFrame("Frame", nil, WorldMapFrame, "BackdropTemplate")
     frame:SetWidth(WIDTH)
-    -- Bottom left: the map's own buttons and most addons use the top corners.
-    frame:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", 6, 6)
-    -- Above the map canvas and its pins, below the map's own dropdowns and dialogs.
-    frame:SetFrameLevel(container:GetFrameLevel() + 1000)
+    frame:SetPoint("TOPLEFT", WorldMapFrame, "TOPRIGHT", 4, 0)
+    frame:SetPoint("BOTTOMLEFT", WorldMapFrame, "BOTTOMRIGHT", 4, 0)
     frame:SetBackdrop({
         bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        edgeSize = 12, insets = { left = 3, right = 3, top = 3, bottom = 3 },
+        edgeSize = 14, insets = { left = 4, right = 4, top = 4, bottom = 4 },
     })
-    frame:SetBackdropColor(0, 0, 0, 0.8)
-    frame:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
-    frame:EnableMouse(true)  -- clicks on the list must not reach the map
+    frame:SetBackdropColor(0.05, 0.05, 0.05, 0.92)
+    frame:SetBackdropBorderColor(0.7, 0.7, 0.7, 1)
+    frame:EnableMouse(true)
 
-    -- Title bar: click to fold or unfold the list.
-    local header = CreateFrame("Button", nil, frame)
-    header:SetPoint("TOPLEFT", INSET, -INSET)
-    header:SetPoint("TOPRIGHT", -INSET, -INSET)
-    header:SetHeight(HEADER_H - INSET)
-    header.Arrow = header:CreateTexture(nil, "OVERLAY")
-    header.Arrow:SetSize(14, 14)
-    header.Arrow:SetPoint("LEFT", 2, 0)
-    header.Title = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    header.Title:SetPoint("LEFT", header.Arrow, "RIGHT", 4, 0)
-    header:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
-    header:SetScript("OnClick", function()
-        ns.db.listCollapsed = not ns.db.listCollapsed
-        RareList.Update()
-    end)
-    frame.Header = header
+    frame.Title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    frame.Title:SetPoint("TOPLEFT", INSET + 4, -INSET - 6)
+    frame.Close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
+    frame.Close:SetPoint("TOPRIGHT", 0, 0)
+    frame.Close:SetScript("OnClick", function() SetOpen(false) end)
 
     frame.Scroll = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
     frame.Scroll.scrollBarHideable = true  -- the template then hides it when nothing scrolls
@@ -137,10 +134,9 @@ local function Create()
     frame.Scroll:SetScrollChild(frame.Content)
 end
 
--- Fits the list to its rows; the scroll bar only shows when they do not all fit.
+-- Fits the rows to the panel; the scroll bar only shows when they do not all fit.
 local function Layout(count)
-    local maxHeight = WorldMapFrame.ScrollContainer:GetHeight() - MAX_HEIGHT_MARGIN
-    local listHeight = math.min(count * ROW_H, maxHeight - HEADER_H - INSET)
+    local listHeight = frame:GetHeight() - HEADER_H - INSET
     local scrolls = count * ROW_H > listHeight
     local rowWidth = WIDTH - 2 * INSET - (scrolls and SCROLLBAR_W or 0)
     frame.Scroll:SetPoint("BOTTOMRIGHT", -INSET - (scrolls and SCROLLBAR_W or 0), INSET)
@@ -148,24 +144,21 @@ local function Layout(count)
     if not scrolls then frame.Scroll:SetVerticalScroll(0) end
     frame.Content:SetSize(rowWidth, math.max(1, count * ROW_H))
     for _, row in ipairs(rows) do row:SetWidth(rowWidth) end
-    frame:SetHeight(HEADER_H + listHeight + INSET)
 end
 
---- Redraws the list from the groups last shown on the map (status, order, size).
+--- Redraws the panel from the groups last shown on the map (status, order, size).
 function RareList.Update()
     if not frame then return end
-    frame:SetShown(ns.db.showList and #groups > 0)
-    if not frame:IsShown() then return end
+    local enabled = ns.db.showList and #groups > 0
+    local open = enabled and not ns.db.listCollapsed
+    local title = L["Rares (%d)"]:format(#groups)
+    openButton:SetText(title)
+    openButton:SetWidth(openButton:GetTextWidth() + 30)
+    openButton:SetShown(enabled and not open)
+    frame:SetShown(open)
+    if not open then return end
 
-    local collapsed = ns.db.listCollapsed
-    frame.Header.Title:SetText(L["Rares (%d)"]:format(#groups))
-    frame.Header.Arrow:SetTexture(collapsed and COLLAPSED or EXPANDED)
-    frame.Scroll:SetShown(not collapsed)
-    if collapsed then
-        frame:SetHeight(HEADER_H + INSET)
-        return
-    end
-
+    frame.Title:SetText(title)
     local entries = RareList.SortedEntries(groups, time())
     for i, entry in ipairs(entries) do
         local row = GetRow(i)
