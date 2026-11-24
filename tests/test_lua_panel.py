@@ -62,21 +62,21 @@ WEAPON, ARMOR, CONSUMABLE = 2, 4, 0
 @pytest.mark.parametrize(
     ("token", "class_id", "subclass", "equip_loc", "expected"),
     [
-        ("WARRIOR", ARMOR, 4, "INVTYPE_CHEST", True),     # plate
-        ("WARRIOR", ARMOR, 1, "INVTYPE_CHEST", True),     # lighter armor still usable
+        ("WARRIOR", ARMOR, 4, "INVTYPE_CHEST", True),  # plate
+        ("WARRIOR", ARMOR, 1, "INVTYPE_CHEST", True),  # lighter armor still usable
         ("WARRIOR", ARMOR, 6, "INVTYPE_SHIELD", True),
         ("WARRIOR", WEAPON, 19, "INVTYPE_RANGEDRIGHT", False),  # wand
-        ("ROGUE", ARMOR, 3, "INVTYPE_CHEST", False),      # mail
-        ("ROGUE", WEAPON, 15, "INVTYPE_WEAPON", True),    # dagger
-        ("MAGE", ARMOR, 2, "INVTYPE_HEAD", False),        # leather
+        ("ROGUE", ARMOR, 3, "INVTYPE_CHEST", False),  # mail
+        ("ROGUE", WEAPON, 15, "INVTYPE_WEAPON", True),  # dagger
+        ("MAGE", ARMOR, 2, "INVTYPE_HEAD", False),  # leather
         ("MAGE", ARMOR, 1, "INVTYPE_CLOAK", True),
-        ("MAGE", ARMOR, 0, "INVTYPE_FINGER", True),       # rings fit everyone
-        ("MAGE", WEAPON, 1, "INVTYPE_2HWEAPON", False),   # two-handed axe
+        ("MAGE", ARMOR, 0, "INVTYPE_FINGER", True),  # rings fit everyone
+        ("MAGE", WEAPON, 1, "INVTYPE_2HWEAPON", False),  # two-handed axe
         ("PRIEST", ARMOR, 6, "INVTYPE_SHIELD", False),
-        ("DRUID", ARMOR, 8, "INVTYPE_RELIC", True),       # idol
+        ("DRUID", ARMOR, 8, "INVTYPE_RELIC", True),  # idol
         ("PALADIN", ARMOR, 8, "INVTYPE_RELIC", False),
-        ("HUNTER", WEAPON, 14, "INVTYPE_WEAPON", True),   # miscellaneous
-        ("MONK", ARMOR, 4, "INVTYPE_CHEST", True),        # unknown class: no filtering
+        ("HUNTER", WEAPON, 14, "INVTYPE_WEAPON", True),  # miscellaneous
+        ("MONK", ARMOR, 4, "INVTYPE_CHEST", True),  # unknown class: no filtering
         ("PRIEST", CONSUMABLE, 0, "", True),
     ],
 )
