@@ -16,6 +16,7 @@ local DEFAULTS = {
     showPaths = true,
     showSpawnCount = false,  -- number of possible spawn points on the pin
     showSpawnArea = false,   -- outline enclosing all of a rare's possible spawn points
+    showList = true,         -- list of the map's rares, on the world map
     alerts = true,
     contributeReminders = true,  -- clickable chat message to share recorded rares
 }
@@ -153,14 +154,21 @@ local CREATURE_TYPES = {
     [9] = { L["Mechanical"], "Icon_PetFamily_Mechanical", 0.6, 0.8, 0.85 },
 }
 
+--- Inline icon of the rare's creature type, nil when unknown.
+function ns.CreatureTypeIcon(rare, iconSize)
+    local info = CREATURE_TYPES[rare.ctype]
+    if not info then return nil end
+    -- Crop the icon border (5..59 of 64) so it blends with the text.
+    return ("|TInterface\\Icons\\%s:%d:%d:0:0:64:64:5:59:5:59|t"):format(
+        info[2], iconSize or 14, iconSize or 14)
+end
+
 --- Inline icon plus colored name of the rare's creature type, nil when unknown.
 function ns.FormatCreatureType(rare, iconSize)
     local info = CREATURE_TYPES[rare.ctype]
     if not info then return nil end
-    -- Crop the icon border (5..59 of 64) so it blends with the text.
-    local icon = ("|TInterface\\Icons\\%s:%d:%d:0:0:64:64:5:59:5:59|t"):format(
-        info[2], iconSize or 14, iconSize or 14)
-    return icon .. " " .. ColorCode(info[3], info[4], info[5]) .. info[1] .. "|r"
+    return ns.CreatureTypeIcon(rare, iconSize) .. " "
+        .. ColorCode(info[3], info[4], info[5]) .. info[1] .. "|r"
 end
 
 -- Same colors the game uses for mob levels: grey, green, yellow, orange, red.
@@ -170,14 +178,18 @@ local function LevelColor(level)
     return color and ColorCode(color.r, color.g, color.b)
 end
 
+--- The rare's level colored by difficulty for the player.
+function ns.FormatColoredLevel(rare)
+    local level = ns.FormatLevel(rare)
+    local levelColor = LevelColor(rare.level and rare.level[2])
+    return levelColor and (levelColor .. level .. "|r") or level
+end
+
 --- "Level 9 Rare · Beast": the level colored by difficulty for the player.
 function ns.FormatLevelLine(rare, rankColor)
     local rank = ns.FormatRank(rare)
     if rankColor then rank = rankColor .. rank .. "|r" end
-    local level = ns.FormatLevel(rare)
-    local levelColor = LevelColor(rare.level and rare.level[2])
-    if levelColor then level = levelColor .. level .. "|r" end
-    local line = L["Level %s %s"]:format(level, rank)
+    local line = L["Level %s %s"]:format(ns.FormatColoredLevel(rare), rank)
     local creatureType = ns.FormatCreatureType(rare)
     return creatureType and (line .. " · " .. creatureType) or line
 end

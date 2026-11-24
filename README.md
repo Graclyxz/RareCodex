@@ -17,6 +17,12 @@ sight, intercept its patrol and know what to expect before you pull it.
 - **Loot with drop chances**: every item with its estimated drop rate. Random world drops are
   summarized by quality, and the rare/epic ones are listed item by item.
 - **Personal stats**: last time seen, kill count and what you have looted from each rare.
+- **Respawn status**: after a rare dies (killed by you or anyone else) its pin dims and shows
+  a countdown to its respawn window; rares seen alive a moment ago glow.
+- **Rare list on the map**: every rare of the map you are viewing, sorted by status and level.
+  Hover a row to highlight its pin and route, click it for the details.
+- **Gear tab**: weapons and armor a rare can drop from world loot, with a *For me* filter
+  for what your class can equip.
 - **Alerts**: sound and on-screen warning when a rare shows up on your minimap.
 - **Community data**: rares that are not in the database yet (new WoW Forever content) are
   recorded with their location, and a clickable chat message guides you to share them so

@@ -93,25 +93,32 @@ function Provider:RemoveAllData()
     ns.Overlay.Clear()
 end
 
+-- Groups (one per rare) of the map being shown, or nil when its pins are turned off.
+local function GroupsToShow(mapID)
+    if not mapID or not ns.db then return nil end
+    local scope = ns.Coords.ScopeOfMap(mapID)
+    if not scope or not ns.db.show[scope] then return nil end
+    return ns.Coords.GroupsForMap(mapID), scope
+end
+
 function Provider:RefreshAllData()
     self:RemoveAllData()
     local map = self:GetMap()
     local mapID = map:GetMapID()
-    if not mapID or not ns.db then return end
-    local scope = ns.Coords.ScopeOfMap(mapID)
-    if not scope or not ns.db.show[scope] then return end
-    local groups = ns.Coords.GroupsForMap(mapID)
-    -- Routes and spawn dots only on zone maps: on continents they are unreadable and expensive.
-    if scope == "zone" then ns.Overlay.Draw(map, mapID, groups) end
-    for _, group in ipairs(groups) do
-        map:AcquirePin(PIN_TEMPLATE, group)
+    local groups, scope = GroupsToShow(mapID)
+    if groups then
+        -- Routes and spawn dots only on zone maps: on continents they are unreadable and slow.
+        if scope == "zone" then ns.Overlay.Draw(map, mapID, groups) end
+        for _, group in ipairs(groups) do
+            map:AcquirePin(PIN_TEMPLATE, group)
+        end
     end
+    ns.RareList.SetGroups(map, groups)
 end
 
 function Provider:OnCanvasScaleChanged()
     ns.Overlay.UpdateThickness(self:GetMap())
 end
-
 
 function ns.RefreshMap()
     if WorldMapFrame and WorldMapFrame:IsShown() then
@@ -119,12 +126,13 @@ function ns.RefreshMap()
     end
 end
 
---- Updates the status of the pins on screen (cheap: no redraw of routes or pins).
+--- Updates the status of the pins and list on screen (cheap: no redraw of routes or pins).
 function ns.RefreshPins()
     if not (WorldMapFrame and WorldMapFrame:IsShown()) then return end
     for pin in WorldMapFrame:EnumeratePinsByTemplate(PIN_TEMPLATE) do
         pin:UpdateStatus()
     end
+    ns.RareList.Update()
 end
 
 function ns.SetWaypoint(uiMapID, x, y)
