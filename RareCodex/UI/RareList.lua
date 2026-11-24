@@ -63,8 +63,7 @@ end
 
 local function RowOnLeave()
     GameTooltip:Hide()
-    ns.PingRare(nil)
-    if map then ns.Overlay.Highlight(map, nil) end
+    ns.RestoreFocus()  -- back to the rare open in the detail panel, if any
 end
 
 local function RowOnClick(row)

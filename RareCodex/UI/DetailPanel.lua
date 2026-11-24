@@ -639,11 +639,15 @@ end
 -- Public API ---------------------------------------------------------------------
 function DetailPanel.Show(npcID)
     if not ns.Rares[npcID] then return end
-    if not panel then CreatePanel() end
+    if not panel then
+        CreatePanel()
+        panel:HookScript("OnHide", function() ns.SetFocus(nil) end)
+    end
     currentID = npcID
     for _, loot in ipairs(ns.Rares[npcID].loot) do C_Item.RequestLoadItemDataByID(loot[1]) end
     Render(npcID)
     panel:Show()
+    ns.SetFocus(npcID)  -- keep it highlighted on the map
 end
 
 function DetailPanel.Refresh(npcID)

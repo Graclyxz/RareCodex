@@ -147,7 +147,7 @@ local function ChooseRare(owner, groups)
                 button:SetOnEnter(function()
                     ns.Overlay.Highlight(map, group, { [group] = colors[group] })
                 end)
-                button:SetOnLeave(function() ns.Overlay.Highlight(map, nil) end)
+                button:SetOnLeave(function() ns.RestoreFocus() end)
             end
         end
     end)
@@ -156,7 +156,7 @@ end
 function RareCodexPinMixin:OnMouseLeave()
     GameTooltip:Hide()
     self:SetPing(false)
-    ns.Overlay.Highlight(self:GetMap(), nil)
+    ns.RestoreFocus()
 end
 
 -- The map canvas routes clicks through OnMouseClickAction (newer clients) or OnMouseUp
@@ -229,6 +229,7 @@ function Provider:RefreshAllData()
         AcquirePins(map, clusters)
     end
     ns.RareList.SetGroups(map, groups)
+    ns.RestoreFocus()
 end
 
 -- Zooming: line thickness follows at once; pins are clustered again once the zoom settles,
@@ -248,6 +249,7 @@ function Provider:OnCanvasScaleChanged()
         self.clusterCount = #clusters
         map:RemoveAllPinsByTemplate(PIN_TEMPLATE)
         AcquirePins(map, clusters)
+        ns.RestoreFocus()
     end)
 end
 
@@ -264,12 +266,37 @@ local function HasGroup(cluster, group)
     return false
 end
 
---- Pings the pin showing a rare group (nil stops every ping).
+--- Pings the pin showing a rare group; nil goes back to the focused rare (ns.SetFocus).
 function ns.PingRare(group)
+    if not group then return ns.RestoreFocus() end
     if not (WorldMapFrame and WorldMapFrame:IsShown()) then return end
     for pin in WorldMapFrame:EnumeratePinsByTemplate(PIN_TEMPLATE) do
-        pin:SetPing(group ~= nil and HasGroup(pin.cluster, group))
+        pin:SetPing(HasGroup(pin.cluster, group))
     end
+end
+
+-- The rare open in the detail panel stays in focus on the map: its pin pings softly and its
+-- route stays highlighted, so it is not lost among the other pins. Hovering other pins or
+-- list rows shows them for a moment; leaving them comes back here.
+local focusNpcID
+
+function ns.SetFocus(npcID)
+    focusNpcID = npcID
+    ns.RestoreFocus()
+end
+
+function ns.RestoreFocus()
+    if not (WorldMapFrame and WorldMapFrame:IsShown()) then return end
+    local focusGroup
+    for pin in WorldMapFrame:EnumeratePinsByTemplate(PIN_TEMPLATE) do
+        local found
+        for _, group in ipairs(pin.cluster.groups) do
+            if group.npcID == focusNpcID then found = group end
+        end
+        pin:SetPing(found ~= nil, true)
+        focusGroup = focusGroup or found
+    end
+    ns.Overlay.Highlight(WorldMapFrame, focusGroup)
 end
 
 --- Updates the status of the pins and list on screen (cheap: no redraw of routes or pins).
