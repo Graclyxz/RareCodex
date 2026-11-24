@@ -17,6 +17,7 @@ local DEFAULTS = {
     showSpawnCount = false,  -- number of possible spawn points on the pin
     showSpawnArea = false,   -- outline enclosing all of a rare's possible spawn points
     showList = true,         -- list of the map's rares, on the world map
+    listCollapsed = false,   -- that list folded to its title
     alerts = true,
     contributeReminders = true,  -- clickable chat message to share recorded rares
 }

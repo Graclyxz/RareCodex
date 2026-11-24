@@ -1,5 +1,5 @@
--- RareList: list of the rares on the world map being viewed, on top of the map's left side.
--- Hovering a row highlights the rare's pin and route; clicking opens its details.
+-- RareList: list of the rares on the world map being viewed, in the map's bottom left corner.
+-- Its title folds it; hovering a row highlights the rare's pin and route, clicking opens it.
 local _, ns = ...
 local L = ns.L
 
@@ -8,16 +8,17 @@ ns.RareList = RareList
 
 local WIDTH = 240
 local ROW_H = 20
-local HEADER_H = 24
-local MAX_HEIGHT_MARGIN = 70   -- room left below the list inside the map
-local TOGGLE_SIZE = 28
-local ICON = "Interface\\Icons\\INV_Misc_Book_09"
+local HEADER_H = 22
+local INSET = 4
+local SCROLLBAR_W = 22
+local MAX_HEIGHT_MARGIN = 80   -- room left above the list inside the map
+local EXPANDED, COLLAPSED = "Interface\\Buttons\\UI-MinusButton-Up", "Interface\\Buttons\\UI-PlusButton-Up"
 
 -- Lower sorts first: rares that may be up before the ones known to be dead.
 local STATUS_ORDER = { seen = 1, window = 2, none = 3, dead = 4 }
 
 local map, groups = nil, {}
-local toggle, frame
+local frame
 local rows = {}
 
 --- Rows for the given groups (one per rare) sorted by status, then level, then name.
@@ -61,8 +62,7 @@ local function RowOnLeave()
     if map then ns.Overlay.Highlight(map, nil) end
 end
 
-local function RowOnClick(row, button)
-    if button ~= "LeftButton" then return end
+local function RowOnClick(row)
     local group = row.group
     if IsShiftKeyDown() and map then
         ns.SetWaypoint(map:GetMapID(), group.primary.x, group.primary.y)
@@ -74,17 +74,17 @@ end
 local function GetRow(index)
     if rows[index] then return rows[index] end
     local row = CreateFrame("Button", nil, frame.Content)
-    row:SetSize(WIDTH - 34, ROW_H)
+    row:SetHeight(ROW_H)
     row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
-    row.Name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    row.Name:SetPoint("LEFT", 4, 0)
-    row.Name:SetJustifyH("LEFT")
-    row.Name:SetWordWrap(false)
     row.Status = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     row.Status:SetPoint("RIGHT", -4, 0)
     row.Level = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     row.Level:SetPoint("RIGHT", -52, 0)
+    row.Name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.Name:SetPoint("LEFT", 4, 0)
     row.Name:SetPoint("RIGHT", row.Level, "LEFT", -4, 0)
+    row.Name:SetJustifyH("LEFT")
+    row.Name:SetWordWrap(false)
     row:RegisterForClicks("LeftButtonUp")
     row:SetScript("OnEnter", RowOnEnter)
     row:SetScript("OnLeave", RowOnLeave)
@@ -94,36 +94,15 @@ local function GetRow(index)
     return row
 end
 
--- Frames -------------------------------------------------------------------------
+-- Frame --------------------------------------------------------------------------
 local function Create()
     local container = WorldMapFrame.ScrollContainer
-    -- Above the map canvas and its pins, below the map's own dropdowns and dialogs.
-    local level = container:GetFrameLevel() + 1000
-
-    toggle = CreateFrame("Button", nil, WorldMapFrame)
-    toggle:SetSize(TOGGLE_SIZE, TOGGLE_SIZE)
-    toggle:SetPoint("TOPLEFT", container, "TOPLEFT", 6, -6)
-    toggle:SetFrameLevel(level)
-    toggle:SetNormalTexture(ICON)
-    toggle:SetPushedTexture(ICON)
-    toggle:GetPushedTexture():SetVertexColor(0.7, 0.7, 0.7)
-    toggle:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
-    toggle:SetScript("OnClick", function()
-        ns.db.showList = not ns.db.showList
-        RareList.Update()
-    end)
-    toggle:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine("RareCodex")
-        GameTooltip:AddLine(L["Show or hide the list of rares on this map"], 1, 1, 1, true)
-        GameTooltip:Show()
-    end)
-    toggle:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
     frame = CreateFrame("Frame", nil, WorldMapFrame, "BackdropTemplate")
     frame:SetWidth(WIDTH)
-    frame:SetPoint("TOPLEFT", toggle, "BOTTOMLEFT", 0, -4)
-    frame:SetFrameLevel(level)
+    -- Bottom left: the map's own buttons and most addons use the top corners.
+    frame:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", 6, 6)
+    -- Above the map canvas and its pins, below the map's own dropdowns and dialogs.
+    frame:SetFrameLevel(container:GetFrameLevel() + 1000)
     frame:SetBackdrop({
         bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -133,27 +112,61 @@ local function Create()
     frame:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
     frame:EnableMouse(true)  -- clicks on the list must not reach the map
 
-    frame.Title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    frame.Title:SetPoint("TOPLEFT", 8, -7)
+    -- Title bar: click to fold or unfold the list.
+    local header = CreateFrame("Button", nil, frame)
+    header:SetPoint("TOPLEFT", INSET, -INSET)
+    header:SetPoint("TOPRIGHT", -INSET, -INSET)
+    header:SetHeight(HEADER_H - INSET)
+    header.Arrow = header:CreateTexture(nil, "OVERLAY")
+    header.Arrow:SetSize(14, 14)
+    header.Arrow:SetPoint("LEFT", 2, 0)
+    header.Title = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    header.Title:SetPoint("LEFT", header.Arrow, "RIGHT", 4, 0)
+    header:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+    header:SetScript("OnClick", function()
+        ns.db.listCollapsed = not ns.db.listCollapsed
+        RareList.Update()
+    end)
+    frame.Header = header
 
     frame.Scroll = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
-    frame.Scroll:SetPoint("TOPLEFT", 4, -HEADER_H)
-    frame.Scroll:SetPoint("BOTTOMRIGHT", -26, 6)
+    frame.Scroll.scrollBarHideable = true  -- the template then hides it when nothing scrolls
+    frame.Scroll:SetPoint("TOPLEFT", INSET, -HEADER_H)
     frame.Content = CreateFrame("Frame", nil, frame.Scroll)
-    frame.Content:SetSize(WIDTH - 34, 1)
+    frame.Content:SetSize(1, 1)
     frame.Scroll:SetScrollChild(frame.Content)
+end
+
+-- Fits the list to its rows; the scroll bar only shows when they do not all fit.
+local function Layout(count)
+    local maxHeight = WorldMapFrame.ScrollContainer:GetHeight() - MAX_HEIGHT_MARGIN
+    local listHeight = math.min(count * ROW_H, maxHeight - HEADER_H - INSET)
+    local scrolls = count * ROW_H > listHeight
+    local rowWidth = WIDTH - 2 * INSET - (scrolls and SCROLLBAR_W or 0)
+    frame.Scroll:SetPoint("BOTTOMRIGHT", -INSET - (scrolls and SCROLLBAR_W or 0), INSET)
+    frame.Scroll.ScrollBar:SetShown(scrolls)
+    if not scrolls then frame.Scroll:SetVerticalScroll(0) end
+    frame.Content:SetSize(rowWidth, math.max(1, count * ROW_H))
+    for _, row in ipairs(rows) do row:SetWidth(rowWidth) end
+    frame:SetHeight(HEADER_H + listHeight + INSET)
 end
 
 --- Redraws the list from the groups last shown on the map (status, order, size).
 function RareList.Update()
     if not frame then return end
-    local visible = #groups > 0
-    toggle:SetShown(visible)
-    frame:SetShown(visible and ns.db.showList)
+    frame:SetShown(ns.db.showList and #groups > 0)
     if not frame:IsShown() then return end
 
+    local collapsed = ns.db.listCollapsed
+    frame.Header.Title:SetText(L["Rares (%d)"]:format(#groups))
+    frame.Header.Arrow:SetTexture(collapsed and COLLAPSED or EXPANDED)
+    frame.Scroll:SetShown(not collapsed)
+    if collapsed then
+        frame:SetHeight(HEADER_H + INSET)
+        return
+    end
+
     local entries = RareList.SortedEntries(groups, time())
-    frame.Title:SetText(L["Rares (%d)"]:format(#entries))
     for i, entry in ipairs(entries) do
         local row = GetRow(i)
         row.group = entry.group
@@ -165,11 +178,7 @@ function RareList.Update()
         row:Show()
     end
     for i = #entries + 1, #rows do rows[i]:Hide() end
-    frame.Content:SetHeight(math.max(1, #entries * ROW_H))
-
-    local maxHeight = WorldMapFrame.ScrollContainer:GetHeight() - MAX_HEIGHT_MARGIN
-    frame:SetHeight(math.max(HEADER_H + ROW_H + 8,
-        math.min(HEADER_H + #entries * ROW_H + 8, maxHeight)))
+    Layout(#entries)
 end
 
 --- Called by the map data provider whenever the shown map or its pins change.

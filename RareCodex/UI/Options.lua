@@ -23,6 +23,7 @@ local ITEMS = {
     Check(L["Patrol routes and wander areas on zone maps"], Setting("showPaths")),
     Check(L["Spawn area: outline around all the points where a rare can spawn"], Setting("showSpawnArea")),
     Check(L["Number of possible spawn points on each pin"], Setting("showSpawnCount")),
+    Check(L["List of the map's rares in the corner of the world map"], Setting("showList")),
     { section = L["Alerts"] },
     Check(L["Sound and on-screen warning when a rare appears"], Setting("alerts")),
     { section = L["Rares recorded in game"] },
