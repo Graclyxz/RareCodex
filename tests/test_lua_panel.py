@@ -25,6 +25,7 @@ def gear_list():  # noqa: ANN201 - Lua function
     )
     load = lua.eval("function(src) return load(src, 'DetailPanel.lua') end")
     load(PANEL.read_text(encoding="utf-8"))("RareCodex", ns)
+    lua.globals().CanUseForTest = ns.DetailPanel._CanUse
     return lua, ns.DetailPanel._GearList
 
 
@@ -53,3 +54,33 @@ def test_better_quality_first_and_missing_pools_ignored(gear_list) -> None:  # n
 def test_rare_without_world_drops_has_no_gear(gear_list) -> None:  # noqa: ANN001
     lua, fn = gear_list
     assert entries(lua, fn, "{}") == []
+
+
+WEAPON, ARMOR, CONSUMABLE = 2, 4, 0
+
+
+@pytest.mark.parametrize(
+    ("token", "class_id", "subclass", "equip_loc", "expected"),
+    [
+        ("WARRIOR", ARMOR, 4, "INVTYPE_CHEST", True),     # plate
+        ("WARRIOR", ARMOR, 1, "INVTYPE_CHEST", True),     # lighter armor still usable
+        ("WARRIOR", ARMOR, 6, "INVTYPE_SHIELD", True),
+        ("WARRIOR", WEAPON, 19, "INVTYPE_RANGEDRIGHT", False),  # wand
+        ("ROGUE", ARMOR, 3, "INVTYPE_CHEST", False),      # mail
+        ("ROGUE", WEAPON, 15, "INVTYPE_WEAPON", True),    # dagger
+        ("MAGE", ARMOR, 2, "INVTYPE_HEAD", False),        # leather
+        ("MAGE", ARMOR, 1, "INVTYPE_CLOAK", True),
+        ("MAGE", ARMOR, 0, "INVTYPE_FINGER", True),       # rings fit everyone
+        ("MAGE", WEAPON, 1, "INVTYPE_2HWEAPON", False),   # two-handed axe
+        ("PRIEST", ARMOR, 6, "INVTYPE_SHIELD", False),
+        ("DRUID", ARMOR, 8, "INVTYPE_RELIC", True),       # idol
+        ("PALADIN", ARMOR, 8, "INVTYPE_RELIC", False),
+        ("HUNTER", WEAPON, 14, "INVTYPE_WEAPON", True),   # miscellaneous
+        ("MONK", ARMOR, 4, "INVTYPE_CHEST", True),        # unknown class: no filtering
+        ("PRIEST", CONSUMABLE, 0, "", True),
+    ],
+)
+def test_can_use(gear_list, token, class_id, subclass, equip_loc, expected) -> None:  # noqa: ANN001
+    lua, _ = gear_list
+    can_use = lua.globals().CanUseForTest
+    assert bool(can_use(token, class_id, subclass, equip_loc)) is expected

@@ -25,14 +25,56 @@ local GEAR_CELL = 42
 local CONTENT_BOTTOM = -(HEIGHT - PAD - 22 - 12)  -- just above the bottom buttons
 local ITEM_CLASS_WEAPON, ITEM_CLASS_ARMOR = 2, 4
 local GEAR_FILTERS = {
+    { key = "mine", label = L["For me"] },
     { key = "all", label = L["All"] },
     { key = ITEM_CLASS_WEAPON, label = L["Weapons"] },
     { key = ITEM_CLASS_ARMOR, label = L["Armor"] },
 }
+local FILTER_W, FILTER_GAP = 86, 6
+
+-- What each class can equip in Classic (weapon and armor subclass IDs). Armor is the
+-- heaviest type the class ever wears (plate/mail from level 40) plus every lighter one.
+local CLOTH, LEATHER, MAIL, PLATE = 1, 2, 3, 4
+local SHIELD, LIBRAM, IDOL, TOTEM = 6, 7, 8, 9
+local WEAPON_MISC, FISHING_POLE = 14, 20
+local function Set(...)
+    local set = {}
+    for i = 1, select("#", ...) do set[select(i, ...)] = true end
+    return set
+end
+local CLASS_GEAR = {
+    WARRIOR = { armor = PLATE, extra = Set(SHIELD),
+        weapons = Set(0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 13, 15, 16, 18) },
+    PALADIN = { armor = PLATE, extra = Set(SHIELD, LIBRAM), weapons = Set(0, 1, 4, 5, 6, 7, 8) },
+    HUNTER = { armor = MAIL, extra = Set(),
+        weapons = Set(0, 1, 2, 3, 6, 7, 8, 10, 13, 15, 16, 18) },
+    SHAMAN = { armor = MAIL, extra = Set(SHIELD, TOTEM), weapons = Set(0, 1, 4, 5, 10, 13, 15) },
+    ROGUE = { armor = LEATHER, extra = Set(), weapons = Set(2, 3, 4, 7, 13, 15, 16, 18) },
+    DRUID = { armor = LEATHER, extra = Set(IDOL), weapons = Set(4, 5, 10, 13, 15) },
+    PRIEST = { armor = CLOTH, extra = Set(), weapons = Set(4, 10, 15, 19) },
+    MAGE = { armor = CLOTH, extra = Set(), weapons = Set(7, 10, 15, 19) },
+    WARLOCK = { armor = CLOTH, extra = Set(), weapons = Set(7, 10, 15, 19) },
+}
+
+--- Whether a class (UnitClass token) can equip an item, from GetItemInfoInstant's
+--- classID, subclassID and equipLoc. Unknown classes can use everything.
+local function CanUse(classToken, classID, subclassID, equipLoc)
+    local gear = CLASS_GEAR[classToken]
+    if not gear then return true end
+    if classID == ITEM_CLASS_WEAPON then
+        return gear.weapons[subclassID] or subclassID == WEAPON_MISC
+            or subclassID == FISHING_POLE
+    end
+    if classID ~= ITEM_CLASS_ARMOR then return true end
+    -- Rings, necks, trinkets (misc) and cloaks (cloth) fit every class.
+    if subclassID == 0 or equipLoc == "INVTYPE_CLOAK" then return true end
+    if subclassID >= CLOTH and subclassID <= PLATE then return subclassID <= gear.armor end
+    return gear.extra[subclassID] or false
+end
 
 local panel
 local currentID
-local activeTab, gearFilter = "loot", "all"
+local activeTab, gearFilter = "loot", "mine"
 local spellButtons, lootButtons, worldButtons, gearButtons = {}, {}, {}, {}
 
 -- Widgets ------------------------------------------------------------------------
@@ -196,7 +238,7 @@ local function GearList(rare)
     end)
     return list
 end
-DetailPanel._GearList = GearList  -- exposed for tests/test_lua_panel.py
+DetailPanel._GearList, DetailPanel._CanUse = GearList, CanUse  -- for tests/test_lua_panel.py
 
 local function ShowGearTooltip(self)
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -318,7 +360,7 @@ local function CreatePanel()
     panel.GearFilters = {}
     for i, filter in ipairs(GEAR_FILTERS) do
         local button = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-        button:SetSize(90, 20)
+        button:SetSize(FILTER_W, 20)
         button:SetText(filter.label)
         AddSelectionBar(button)
         button:SetScript("OnClick", function()
@@ -527,7 +569,7 @@ local function RenderGear(gear, top, visible)
     if not visible then return end
 
     for i, filter in ipairs(panel.GearFilters) do
-        filter:SetPoint("TOPLEFT", RIGHT_X + (i - 1) * 96, top)
+        filter:SetPoint("TOPLEFT", RIGHT_X + (i - 1) * (FILTER_W + FILTER_GAP), top)
         SetSelected(filter, gearFilter == filter.key)
     end
     local gridTop = top - 28
@@ -536,10 +578,13 @@ local function RenderGear(gear, top, visible)
     panel.GearScroll:SetPoint("BOTTOMRIGHT", panel, "TOPLEFT", RIGHT_X + GEAR_COLUMNS * GEAR_CELL,
         CONTENT_BOTTOM)
 
+    local classToken = select(2, UnitClass("player"))
     local shown = 0
     for _, entry in ipairs(gear) do
-        local classID = select(6, C_Item.GetItemInfoInstant(entry.itemID))
-        if gearFilter == "all" or classID == gearFilter then
+        local _, _, _, equipLoc, _, classID, subclassID = C_Item.GetItemInfoInstant(entry.itemID)
+        local match = gearFilter == "all" or classID == gearFilter
+            or (gearFilter == "mine" and CanUse(classToken, classID, subclassID, equipLoc))
+        if match then
             shown = shown + 1
             local button = GetGearButton(shown)
             local column, row = (shown - 1) % GEAR_COLUMNS, math.floor((shown - 1) / GEAR_COLUMNS)
