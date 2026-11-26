@@ -19,14 +19,14 @@ local TRACK_MAX_POINTS = 300
 local MAX_TRACKS_PER_RARE = 10
 local tracking = {}           -- [vignetteGUID] = { npcID, mapID, points = {x1, y1, ...}, seen }
 local ticker
+local RecordDeath  -- defined with the kill tracking below
 
-local function Alert(key, name, npcID)
+local function Alert(key, name, npcID, vignetteGUID)
     if not ns.db.alerts then return end
     local now = GetTime()
     if lastAlert[key] and now - lastAlert[key] < ALERT_COOLDOWN then return end
     lastAlert[key] = now
-    PlaySound(SOUNDKIT.RAID_WARNING)
-    RaidNotice_AddMessage(RaidWarningFrame, L["Rare nearby: %s"]:format(name), ChatTypeInfo.RAID_WARNING)
+    ns.AlertToast.Show(name, npcID, vignetteGUID)  -- plays the alert sound too
     if npcID then
         ns.Print(L["Rare nearby: |cffffd200%s|r - type /rc %d for details"]:format(name, npcID))
     else
@@ -150,12 +150,17 @@ local function CheckVignette(vignetteGUID)
     local npcID = ns.NpcIDFromGUID(info.objectGUID)
     if not npcID then return end
     if ns.Rares[npcID] then
-        if not info.isDead then MarkSeen(npcID) end  -- a corpse does not mean it respawned
-        Alert(npcID, ns.GetName(npcID), npcID)
-    elseif info.atlasName and info.atlasName:find("VignetteKill", 1, true) then
+        -- A corpse's vignette: nothing to hunt, but its respawn timer starts.
+        if info.isDead then
+            RecordDeath(info.objectGUID, npcID)
+            return
+        end
+        MarkSeen(npcID)
+        Alert(npcID, ns.GetName(npcID), npcID, vignetteGUID)
+    elseif not info.isDead and info.atlasName and info.atlasName:find("VignetteKill", 1, true) then
         RecordUnknown(npcID, info.name, vignetteGUID)
         StartTracking(vignetteGUID, npcID)
-        Alert(npcID, info.name or "?", nil)
+        Alert(npcID, info.name or "?", nil, vignetteGUID)
     end
 end
 
@@ -213,7 +218,7 @@ end
 -- counts, so finding the corpse again later does not move the timer.
 local deaths = {}  -- [creatureGUID] = true, this session
 
-local function RecordDeath(guid, npcID)
+RecordDeath = function(guid, npcID)
     if deaths[guid] then return end
     deaths[guid] = true
     local state = ns.GetState(npcID)

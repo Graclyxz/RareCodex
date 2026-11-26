@@ -76,3 +76,9 @@ def test_rare_without_respawn_data(lua: LuaRuntime) -> None:
 def test_format_timer(lua: LuaRuntime) -> None:
     fmt = lua.eval("ns.FormatTimer")
     assert [fmt(s) for s in (30, 600, 3600, 4980)] == ["<1m", "10m", "1h 00m", "1h 23m"]
+
+
+def test_format_elapsed(lua: LuaRuntime) -> None:
+    fmt = lua.eval("ns.FormatElapsed")
+    got = [fmt(s) for s in (90, 3599, 74160, 86400, 187200)]
+    assert got == ["1m", "59m", "20h 36m", "1d 0h", "2d 4h"]

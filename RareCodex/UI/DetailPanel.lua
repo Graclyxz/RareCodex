@@ -122,6 +122,7 @@ local function CreateModel(parent)
         self:SetFacing(self.facing)
     end)
     model:SetScript("OnMouseWheel", function(self, delta)
+        if IsControlKeyDown() then return DetailPanel.StepScale(delta) end  -- panel size
         self.zoom = math.min(2.5, math.max(0.4, self.zoom + delta * 0.15))
         self:SetCamDistanceScale(1 / self.zoom)
     end)
@@ -308,16 +309,45 @@ local function PrimarySpawnOnMap(npcID)
     return mapID, x, y
 end
 
+-- Position and size are remembered (ns.db.panel); the panel opens centered until moved.
+local SCALE_MIN, SCALE_MAX, SCALE_STEP = 0.7, 1.4, 0.05
+
+local function SavePosition()
+    local point, _, relativePoint, x, y = panel:GetPoint()
+    local saved = ns.db.panel
+    saved.point, saved.relativePoint, saved.x, saved.y = point, relativePoint, x, y
+end
+
+local function ApplyLayout()
+    local saved = ns.db.panel
+    panel:SetScale(saved.scale)
+    panel:ClearAllPoints()
+    if saved.point then
+        panel:SetPoint(saved.point, UIParent, saved.relativePoint, saved.x, saved.y)
+    else
+        panel:SetPoint("CENTER")
+    end
+end
+
 local function CreatePanel()
     panel = CreateFrame("Frame", "RareCodexDetailPanel", UIParent, "BasicFrameTemplateWithInset")
     panel:SetSize(WIDTH, HEIGHT)
-    panel:SetPoint("CENTER")
     panel:SetFrameStrata("HIGH")
     panel:SetMovable(true)
+    panel:SetClampedToScreen(true)
     panel:EnableMouse(true)
     panel:RegisterForDrag("LeftButton")
     panel:SetScript("OnDragStart", panel.StartMoving)
-    panel:SetScript("OnDragStop", panel.StopMovingOrSizing)
+    panel:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        SavePosition()
+    end)
+    -- Ctrl + mouse wheel resizes the panel (also over the model, which zooms otherwise).
+    panel:EnableMouseWheel(true)
+    panel:SetScript("OnMouseWheel", function(_, delta)
+        if IsControlKeyDown() then DetailPanel.StepScale(delta) end
+    end)
+    ApplyLayout()
     panel:Hide()
     table.insert(UISpecialFrames, "RareCodexDetailPanel")
 
@@ -648,6 +678,30 @@ function DetailPanel.Show(npcID)
     Render(npcID)
     panel:Show()
     ns.SetFocus(npcID)  -- keep it highlighted on the map
+end
+
+--- Panel size from 70% to 140%; nil keeps the current one (used by the options).
+function DetailPanel.SetScale(scale)
+    scale = math.min(SCALE_MAX, math.max(SCALE_MIN, scale))
+    ns.db.panel.scale = math.floor(scale * 100 + 0.5) / 100
+    if panel then panel:SetScale(ns.db.panel.scale) end
+end
+
+function DetailPanel.StepScale(delta)
+    DetailPanel.SetScale(ns.db.panel.scale + delta * SCALE_STEP)
+end
+
+--- Waypoint on a rare's main spawn point.
+function DetailPanel.SetWaypoint(npcID)
+    local mapID, x, y = PrimarySpawnOnMap(npcID)
+    if mapID and x then ns.SetWaypoint(mapID, x, y) end
+end
+
+--- Back to the center at its normal size.
+function DetailPanel.ResetLayout()
+    local saved = ns.db.panel
+    saved.point, saved.relativePoint, saved.x, saved.y, saved.scale = nil, nil, nil, nil, 1
+    if panel then ApplyLayout() end
 end
 
 function DetailPanel.Refresh(npcID)

@@ -20,6 +20,8 @@ local DEFAULTS = {
     listCollapsed = false,   -- that panel closed: only its button on the map's edge shows
     alerts = true,
     contributeReminders = true,  -- clickable chat message to share recorded rares
+    panel = { scale = 1 },  -- detail panel: scale and, once moved, point/relativePoint/x/y
+    alertPosition = {},     -- rare alert toast, once moved: point/relativePoint/x/y
 }
 
 -- Fills missing keys (including inside nested tables) without touching saved values.
@@ -249,10 +251,19 @@ function ns.LeaderOf(rare)
     end
 end
 
+--- Elapsed time for humans: "35m", "20h 36m", "2d 4h".
+function ns.FormatElapsed(seconds)
+    local minutes = math.floor(seconds / 60)
+    if minutes < 60 then return ("%dm"):format(minutes) end
+    local hours = math.floor(minutes / 60)
+    if hours < 24 then return ("%dh %02dm"):format(hours, minutes % 60) end
+    return ("%dd %dh"):format(math.floor(hours / 24), hours % 24)
+end
+
 function ns.FormatAgo(stamp)
     local delta = time() - stamp
     if delta < 60 then return L["just now"] end
-    return L["%s ago"]:format(ns.FormatDuration(delta))
+    return L["%s ago"]:format(ns.FormatElapsed(delta))
 end
 
 function ns.FormatChance(chance)
@@ -288,6 +299,7 @@ local HELP = {
     { "/rc show zone | continent | world", L["toggle pins per map type"] },
     { "/rc paths", L["toggle patrol routes"] },
     { "/rc alerts", L["toggle rare alerts"] },
+    { "/rc testalert", L["show a sample rare alert"] },
     { "/rc share", L["share rares recorded in game that are not in the database"] },
     { "/rc check", L["verify map coordinates"] },
     { "/rc swap", L["flip coordinate axes"] },
@@ -323,6 +335,9 @@ SlashCmdList.RARECODEX = function(input)
         ns.db.showPaths = not ns.db.showPaths
         ns.RefreshMap()
         ns.Print(L["Patrol routes: %s"]:format(OnOff(ns.db.showPaths)))
+    elseif command == "testalert" then
+        local sample = next(ns.Rares)
+        ns.AlertToast.Show(ns.GetName(sample), sample, nil)
     elseif command == "alerts" then
         ns.db.alerts = not ns.db.alerts
         ns.Print(L["Alerts: %s"]:format(OnOff(ns.db.alerts)))

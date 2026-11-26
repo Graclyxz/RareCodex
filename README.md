@@ -23,7 +23,8 @@ sight, intercept its patrol and know what to expect before you pull it.
   Hover a row to highlight its pin and route, click it for the details.
 - **Gear tab**: weapons and armor a rare can drop from world loot, with a *For me* filter
   for what your class can equip.
-- **Alerts**: sound and on-screen warning when a rare shows up on your minimap.
+- **Alerts**: sound and a small window when a rare shows up on your minimap, with its portrait,
+  level, live distance and buttons for a waypoint or its details (drag it to move it).
 - **Community data**: rares that are not in the database yet (new WoW Forever content) are
   recorded with their location, and a clickable chat message guides you to share them so
   they are added for everyone.
