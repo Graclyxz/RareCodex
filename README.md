@@ -53,6 +53,7 @@ waypoint. Settings are under *Options > AddOns > RareCodex*.
 | `/rc show zone\|continent\|world` | Toggle pins per map type (default: zone maps only) |
 | `/rc paths` | Toggle patrol lines |
 | `/rc alerts` | Toggle rare alerts |
+| `/rc testalert` | Show a sample rare alert (to check its sound and place it on screen) |
 | `/rc share` | Share rares recorded in game that are not in the database |
 | `/rc check` | Verify the world-to-map coordinate conversion |
 | `/rc swap` | Flip coordinate axes if pins appear in wrong places |
